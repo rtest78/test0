@@ -1,19 +1,14 @@
 <xsl:when test="name() = 'CounterOfferReasonList'">
-    <xsl:text>[</xsl:text>
+    <xsl:text>"CounterOfferReasonList": [</xsl:text>
 
-    <xsl:for-each select="*">
-        <xsl:text>{</xsl:text>
+    <xsl:text>{</xsl:text>
 
-        <xsl:call-template name="process-children">
-            <xsl:with-param name="nodes" select="*" />
-        </xsl:call-template>
+    <!-- process all child fields -->
+    <xsl:call-template name="process-children">
+        <xsl:with-param name="nodes" select="*" />
+    </xsl:call-template>
 
-        <xsl:text>}</xsl:text>
-
-        <xsl:if test="position() != last()">
-            <xsl:text>,</xsl:text>
-        </xsl:if>
-    </xsl:for-each>
+    <xsl:text>}</xsl:text>
 
     <xsl:text>]</xsl:text>
 </xsl:when>
