@@ -1,9 +1,8 @@
 <xsl:when test="name() = 'CounterOfferReasonList'">
-    <xsl:text>"CounterOfferReasonList": [</xsl:text>
+    <xsl:text>[</xsl:text>
 
     <xsl:text>{</xsl:text>
 
-    <!-- process all child fields -->
     <xsl:call-template name="process-children">
         <xsl:with-param name="nodes" select="*" />
     </xsl:call-template>
