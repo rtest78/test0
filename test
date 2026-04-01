@@ -1,7 +1,7 @@
-<xsl:when test="name() = 'CounterOfferReasonList'">
+<xsl:when test="name() = 'CounterOfferReasonList' and counterOfferReason[*[normalize-space()]]">
     <xsl:text>[</xsl:text>
 
-    <xsl:for-each select="CounterOfferReason">
+    <xsl:for-each select="counterOfferReason[*[normalize-space()]]">
         <xsl:text>{</xsl:text>
 
         <xsl:call-template name="process-children">
@@ -10,7 +10,6 @@
 
         <xsl:text>}</xsl:text>
 
-        <!-- comma between objects -->
         <xsl:if test="position() != last()">
             <xsl:text>,</xsl:text>
         </xsl:if>
