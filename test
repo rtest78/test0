@@ -1,35 +1,19 @@
-{
-  "collections": {
-    "request": {
-      "customerData": [
-        {
-          "accountNumber": "123456789",
-          "memberNumber": 1001,
-          "type2": "AUTO",
-          "amountPastDue": 250.75,
-          "accountBalance": 5000.50,
-          "loanDelinquentDayCount": 15,
-          "monthsOnBooks": 24,
-          "loanTerm": 60,
-          "creditLimit": 10000.0,
-          "fico09Score": 720,
-          "numTradesWorstRating30DaysPastDueWithin6Months": 1,
-          "numTradesWorstRating60DaysPastDueWithin6Months": 0,
-          "numTradesWorstRating90DaysPastDueWithin6Months": 0,
-          "loanPrincAmount": 15000.0,
-          "primPermMlgAddrStCd": "VA",
-          "primPermMlgAddrPstlCdNum": "20105",
-          "primHomePhone": "7035551111",
-          "primCellPhone": "7035552222",
-          "primWorkPhone": "7035553333",
-          "delinquentAccounts": 1,
-          "collectionRiskScore": 85,
-          "riskTreatment": "HIGH",
-          "idC": "ID001"
-        }
-      ],
-      "inputAssignmentFlag": "AUTO",
-      "randomNumber": 1
-    }
-  }
-}
+<xsl:when test="name() = 'CounterOfferReasonList'">
+    <xsl:text>[</xsl:text>
+
+    <xsl:for-each select="*">
+        <xsl:text>{</xsl:text>
+
+        <xsl:call-template name="process-children">
+            <xsl:with-param name="nodes" select="*" />
+        </xsl:call-template>
+
+        <xsl:text>}</xsl:text>
+
+        <xsl:if test="position() != last()">
+            <xsl:text>,</xsl:text>
+        </xsl:if>
+    </xsl:for-each>
+
+    <xsl:text>]</xsl:text>
+</xsl:when>
