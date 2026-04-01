@@ -1,13 +1,20 @@
 <xsl:when test="name() = 'CounterOfferReasonList'">
     <xsl:text>[</xsl:text>
 
-    <xsl:text>{</xsl:text>
+    <xsl:for-each select="CounterOfferReason">
+        <xsl:text>{</xsl:text>
 
-    <xsl:call-template name="process-children">
-        <xsl:with-param name="nodes" select="*" />
-    </xsl:call-template>
+        <xsl:call-template name="process-children">
+            <xsl:with-param name="nodes" select="*" />
+        </xsl:call-template>
 
-    <xsl:text>}</xsl:text>
+        <xsl:text>}</xsl:text>
+
+        <!-- comma between objects -->
+        <xsl:if test="position() != last()">
+            <xsl:text>,</xsl:text>
+        </xsl:if>
+    </xsl:for-each>
 
     <xsl:text>]</xsl:text>
 </xsl:when>
