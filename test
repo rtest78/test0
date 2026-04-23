@@ -1,48 +1,16 @@
 # ============================================================
-# Imports
+# ONE-CELL, CLASS-PACK-SAFE VERSION
+# - All imports used by the model are inside the class methods
+# - predict() returns ONLY prediction output (stable for ClassPack)
+# - processed input is available in wrapped.last_processed
+# - replaced columns are available in wrapped.last_replaced
 # ============================================================
-import os
-import lightgbm as lgb
-import pandas as pd
-import numpy as np
 
-
-# ============================================================
-# Model path
-# Use raw string or forward slashes on Windows
-# ============================================================
-MODEL_FILE_PATH = r"C:\Users\RR01785C\Downloads\loan_risk_model_notebooks\Models\model.txt"
-
-
-# ============================================================
-# Load model separately if you want to inspect feature names
-# ============================================================
-model = lgb.Booster(model_file=MODEL_FILE_PATH)
-print("Model loaded successfully.")
-
-
-# ============================================================
-# Extract Feature Names
-# ============================================================
-raw_feature_names = model.feature_name()
-
-if raw_feature_names and raw_feature_names[0] != "Column_0":
-    feature_names = raw_feature_names
-    print(f"Feature names (from model): {feature_names}")
-else:
-    n = model.num_feature()
-    feature_names = [f"feature_{i}" for i in range(n)]
-    print(f"Feature names (generated): {feature_names}")
-
-n_features = len(feature_names)
-print(f"Feature count: {n_features}")
-
-
-# ============================================================
-# Define LightGBM Wrapper Class
-# ============================================================
 class LightGBMWrapper:
+
     def __init__(self, model_path):
+        import lightgbm as lgb
+
         self.booster = lgb.Booster(model_file=model_path)
 
         raw_feature_names = self.booster.feature_name()
@@ -84,16 +52,17 @@ class LightGBMWrapper:
             "IQT9510": 0,
         }
 
-        # Lowercase maps for case-insensitive matching
         self.feature_name_map = {f.lower(): f for f in self.feature_names}
         self.default_map_lower = {k.lower(): v for k, v in self.default_map.items()}
 
-        # Debug values
+        # Debug holders
         self.last_processed = None
         self.last_replaced = []
 
     def preprocess(self, X):
-        # Convert input to DataFrame
+        import pandas as pd
+        import numpy as np
+
         if isinstance(X, dict):
             X = pd.DataFrame([X])
         elif isinstance(X, list):
@@ -103,7 +72,7 @@ class LightGBMWrapper:
 
         X = X.copy()
 
-        # Normalize input column names to lowercase
+        # Make input columns case-insensitive
         X.columns = [str(col).strip().lower() for col in X.columns]
 
         # Normalize null-like values
@@ -123,7 +92,7 @@ class LightGBMWrapper:
                     replaced_columns.append(feature_lower)
                 X[feature_lower] = X[feature_lower].fillna(default_value)
 
-        # Ensure every model feature exists
+        # Ensure all model features exist
         for feature_lower in self.feature_name_map:
             if feature_lower not in X.columns:
                 X[feature_lower] = np.nan
@@ -131,10 +100,10 @@ class LightGBMWrapper:
         # Rename back to exact model feature names
         X = X.rename(columns=self.feature_name_map)
 
-        # Keep exact model order
+        # Enforce exact model feature order
         X = X[self.feature_names]
 
-        # Convert replaced column names back to original names
+        # Store debug info
         replaced_columns_original = [
             self.feature_name_map.get(col, col)
             if col in self.feature_name_map
@@ -142,44 +111,51 @@ class LightGBMWrapper:
             for col in replaced_columns
         ]
 
-        return X, replaced_columns_original
+        self.last_processed = X.copy()
+        self.last_replaced = replaced_columns_original
 
-    def predict(self, X, feature_names=None):
-        X_processed, replaced_columns = self.preprocess(X)
+        return X
 
+    def predict(self, X):
+        import pandas as pd
+        import numpy as np
+
+        X_processed = self.preprocess(X)
         raw = self.booster.predict(X_processed)
 
         if isinstance(raw, np.ndarray) and raw.ndim == 1:
-            pred_df = pd.DataFrame(raw, columns=["output"])
+            out = pd.DataFrame(raw, columns=["output"])
         else:
-            pred_df = pd.DataFrame(
+            out = pd.DataFrame(
                 raw,
                 columns=[f"output_{i}" for i in range(raw.shape[1])]
             )
 
-        result_df = pd.concat(
-            [X_processed.reset_index(drop=True), pred_df.reset_index(drop=True)],
-            axis=1
-        )
+        # Normalize output for stable ClassPack comparison
+        out = out.reset_index(drop=True)
+        out.columns = [str(c) for c in out.columns]
 
-        # Save debug info
-        self.last_processed = X_processed
-        self.last_replaced = replaced_columns
-
-        return result_df
+        return out
 
 
 # ============================================================
-# Create wrapper instance
+# NOTE:
+# Keep MODEL_FILE_PATH as your LOCAL path here.
+# ClassPack will use only the bundled filename during submission.
 # ============================================================
-wrapper = LightGBMWrapper(MODEL_FILE_PATH)
+MODEL_FILE_PATH = r"C:\Users\RR01785C\Downloads\loan_risk_model_notebooks\Models\model.txt"
+
+# Create wrapper
+wrapped = LightGBMWrapper(MODEL_FILE_PATH)
 print("Wrapper created successfully.")
-print(f"Wrapper feature count: {len(wrapper.feature_names)}")
-
+print("Wrapper feature count:", len(wrapped.feature_names))
 
 # ============================================================
-# Sample input - MUST be a pandas DataFrame
+# FIXED sample input (avoid random synthetic data for ClassPack)
 # ============================================================
+pd = __import__("pandas")
+np = __import__("numpy")
+
 X_sample = pd.DataFrame([
     {
         "clear_early_risk_score": None,
@@ -188,38 +164,45 @@ X_sample = pd.DataFrame([
         "ALL0400": 50,
         "ALL4018": " ",
         "IQT9425": np.nan
+    },
+    {
+        "clear_early_risk_score": 300,
+        "loan_purpose": 1,
+        "AU8220": -1,
+        "ALL0400": 99,
+        "ALL4018": 0,
+        "IQT9425": 90
     }
 ])
 
-print("\nSample input:")
-display(X_sample)
+# Generate expected output
+y_sample = wrapped.predict(X_sample)
+y_sample = y_sample.reset_index(drop=True)
+y_sample.columns = [str(c) for c in y_sample.columns]
 
-
-# ============================================================
-# Predict
-# ============================================================
-y_sample = wrapper.predict(X_sample, feature_names)
-
-print(f"\nInput shape  : {X_sample.shape}")
-print(f"Output shape : {y_sample.shape}")
+print("\nInput shape :", X_sample.shape)
+print("Output shape:", y_sample.shape)
 
 print("\nReplaced columns:")
-print(wrapper.last_replaced)
+print(wrapped.last_replaced)
 
 print("\nProcessed input used for model:")
-display(wrapper.last_processed.head(3))
+display(wrapped.last_processed)
 
-print("\nSample output (first 3 rows):")
-display(y_sample.head(3))
+print("\nSample output:")
+display(y_sample)
 
+# Sanity check
+y_check = wrapped.predict(X_sample)
+y_check = y_check.reset_index(drop=True)
+y_check.columns = [str(c) for c in y_check.columns]
+print("\nSample output equals fresh predict:", y_sample.equals(y_check))
 
 # ============================================================
-# ClassPack preparation
-# sample_input and sample_output must both be DataFrames
+# Prepare ClassPack
 # ============================================================
-model_filename = os.path.basename(MODEL_FILE_PATH)
-
-print("Preparing ClassPack...")
+os_mod = __import__("os")
+model_filename = os_mod.path.basename(MODEL_FILE_PATH)
 
 class_pack = ClassPack.prepare(
     clazz=LightGBMWrapper,
@@ -229,8 +212,25 @@ class_pack = ClassPack.prepare(
     init_kwargs={"model_path": model_filename},
 )
 
-# Bundle the model file into the submission image
 class_pack.add_resource(model_filename, MODEL_FILE_PATH)
 
-print("ClassPack prepared successfully.")
-print(f"Model resource registered: '{model_filename}'")
+print("\nClassPack prepared successfully.")
+print("Model resource registered:", model_filename)
+
+# ============================================================
+# Submit
+# Assumes these already exist in your notebook/environment:
+# MODEL_NAME, CATSP_URL, requirements, MODEL_DESCRIPTION,
+# DMP_TOKEN, MODEL_VERSION
+# ============================================================
+model_submission = class_pack.submit(
+    name=MODEL_NAME,
+    url=CATSP_URL,
+    requirements_txt=requirements,
+    description=MODEL_DESCRIPTION,
+    token=DMP_TOKEN,
+    asset_version=MODEL_VERSION,
+    external_resources={"OMP_NUM_THREADS": "1"}
+)
+
+print("Submission initiated.")
