@@ -1,4 +1,99 @@
- def preprocess(self, X):
+# ============================================================
+# Imports
+# ============================================================
+import os
+import lightgbm as lgb
+import pandas as pd
+import numpy as np
+
+
+# ============================================================
+# Model path
+# Use raw string or forward slashes on Windows
+# ============================================================
+MODEL_FILE_PATH = r"C:\Users\RR01785C\Downloads\loan_risk_model_notebooks\Models\model.txt"
+
+
+# ============================================================
+# Load model separately if you want to inspect feature names
+# ============================================================
+model = lgb.Booster(model_file=MODEL_FILE_PATH)
+print("Model loaded successfully.")
+
+
+# ============================================================
+# Extract Feature Names
+# ============================================================
+raw_feature_names = model.feature_name()
+
+if raw_feature_names and raw_feature_names[0] != "Column_0":
+    feature_names = raw_feature_names
+    print(f"Feature names (from model): {feature_names}")
+else:
+    n = model.num_feature()
+    feature_names = [f"feature_{i}" for i in range(n)]
+    print(f"Feature names (generated): {feature_names}")
+
+n_features = len(feature_names)
+print(f"Feature count: {n_features}")
+
+
+# ============================================================
+# Define LightGBM Wrapper Class
+# ============================================================
+class LightGBMWrapper:
+    def __init__(self, model_path):
+        self.booster = lgb.Booster(model_file=model_path)
+
+        raw_feature_names = self.booster.feature_name()
+        if raw_feature_names and raw_feature_names[0] != "Column_0":
+            self.feature_names = raw_feature_names
+        else:
+            n = self.booster.num_feature()
+            self.feature_names = [f"feature_{i}" for i in range(n)]
+
+        # Hardcoded defaults
+        self.default_map = {
+            "clear_early_risk_score": 300,
+            "loan_purpose": 1,
+            "AU8220": -1,
+            "ALL0400": 99,
+            "ALL4018": 0,
+            "ALL4520": 0,
+            "ALL7120": 999,
+            "ALL7517": 999,
+            "ALL8020": 0,
+            "ALL8183": 0,
+            "ALL8220": 9999,
+            "ALL8225": 0,
+            "ALL8320": 0,
+            "ALM5072": 999999999,
+            "ALM6280": 999,
+            "ALS5400": 0,
+            "ALX8220": 9999,
+            "BCA7300": 999,
+            "BCA8370": -1,
+            "BCC5520": -1,
+            "BCN8220": -1,
+            "BCX7110": 999,
+            "CRU8320": 0,
+            "ILN8320": 9999,
+            "IQF9510": 0,
+            "IQT9425": 90,
+            "IQT9426": 90,
+            "IQT9510": 0,
+        }
+
+        # Lowercase maps for case-insensitive matching
+        self.feature_name_map = {f.lower(): f for f in self.feature_names}
+        self.default_map_lower = {k.lower(): v for k, v in self.default_map.items()}
+
+        # Debug values
+        self.last_processed = None
+        self.last_replaced = []
+
+    def preprocess(self, X):
+        # Convert input to DataFrame
         if isinstance(X, dict):
             X = pd.DataFrame([X])
         elif isinstance(X, list):
@@ -7,35 +102,42 @@
             X = pd.DataFrame(X)
 
         X = X.copy()
+
+        # Normalize input column names to lowercase
         X.columns = [str(col).strip().lower() for col in X.columns]
 
+        # Normalize null-like values
         X = X.replace(["", " ", "NULL", "null", "None"], np.nan)
-
-        for col in X.columns:
-            if X[col].dtype == "object":
-                X[col] = X[col].replace(["", " ", "NULL", "null", "None"], np.nan)
 
         replaced_columns = []
 
+        # Add missing configured columns with defaults
         for feature_lower, default_value in self.default_map_lower.items():
             if feature_lower not in X.columns:
                 X[feature_lower] = default_value
 
+        # Replace null-like values only for configured fields
         for feature_lower, default_value in self.default_map_lower.items():
             if feature_lower in X.columns:
                 if X[feature_lower].isna().any():
                     replaced_columns.append(feature_lower)
                 X[feature_lower] = X[feature_lower].fillna(default_value)
 
+        # Ensure every model feature exists
         for feature_lower in self.feature_name_map:
             if feature_lower not in X.columns:
                 X[feature_lower] = np.nan
 
+        # Rename back to exact model feature names
         X = X.rename(columns=self.feature_name_map)
+
+        # Keep exact model order
         X = X[self.feature_names]
 
+        # Convert replaced column names back to original names
         replaced_columns_original = [
-            self.feature_name_map.get(col, col) if col in self.feature_name_map
+            self.feature_name_map.get(col, col)
+            if col in self.feature_name_map
             else next((k for k in self.default_map if k.lower() == col), col)
             for col in replaced_columns
         ]
@@ -44,6 +146,7 @@
 
     def predict(self, X, feature_names=None):
         X_processed, replaced_columns = self.preprocess(X)
+
         raw = self.booster.predict(X_processed)
 
         if isinstance(raw, np.ndarray) and raw.ndim == 1:
@@ -59,7 +162,75 @@
             axis=1
         )
 
+        # Save debug info
         self.last_processed = X_processed
         self.last_replaced = replaced_columns
 
         return result_df
+
+
+# ============================================================
+# Create wrapper instance
+# ============================================================
+wrapper = LightGBMWrapper(MODEL_FILE_PATH)
+print("Wrapper created successfully.")
+print(f"Wrapper feature count: {len(wrapper.feature_names)}")
+
+
+# ============================================================
+# Sample input - MUST be a pandas DataFrame
+# ============================================================
+X_sample = pd.DataFrame([
+    {
+        "clear_early_risk_score": None,
+        "loan_purpose": "NULL",
+        "AU8220": "",
+        "ALL0400": 50,
+        "ALL4018": " ",
+        "IQT9425": np.nan
+    }
+])
+
+print("\nSample input:")
+display(X_sample)
+
+
+# ============================================================
+# Predict
+# ============================================================
+y_sample = wrapper.predict(X_sample, feature_names)
+
+print(f"\nInput shape  : {X_sample.shape}")
+print(f"Output shape : {y_sample.shape}")
+
+print("\nReplaced columns:")
+print(wrapper.last_replaced)
+
+print("\nProcessed input used for model:")
+display(wrapper.last_processed.head(3))
+
+print("\nSample output (first 3 rows):")
+display(y_sample.head(3))
+
+
+# ============================================================
+# ClassPack preparation
+# sample_input and sample_output must both be DataFrames
+# ============================================================
+model_filename = os.path.basename(MODEL_FILE_PATH)
+
+print("Preparing ClassPack...")
+
+class_pack = ClassPack.prepare(
+    clazz=LightGBMWrapper,
+    sample_input=X_sample,
+    sample_output=y_sample,
+    predict_function_name="predict",
+    init_kwargs={"model_path": model_filename},
+)
+
+# Bundle the model file into the submission image
+class_pack.add_resource(model_filename, MODEL_FILE_PATH)
+
+print("ClassPack prepared successfully.")
+print(f"Model resource registered: '{model_filename}'")
