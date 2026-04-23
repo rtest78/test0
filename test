@@ -1,60 +1,4 @@
-import lightgbm as lgb
-import pandas as pd
-import numpy as np
-
-
-MODEL_FILE_PATH = "lgbm_model.txt"   # update this path
-
-
-class LightGBMWrapper:
-    def __init__(self, model_path):
-        self.booster = lgb.Booster(model_file=model_path)
-
-        raw_feature_names = self.booster.feature_name()
-
-        if raw_feature_names and raw_feature_names[0] != "Column_0":
-            self.feature_names = raw_feature_names
-        else:
-            n = self.booster.num_feature()
-            self.feature_names = [f"feature_{i}" for i in range(n)]
-
-        # Hardcoded defaults
-        self.default_map = {
-            "clear_early_risk_score": 300,
-            "loan_purpose": 1,
-            "AU8220": -1,
-            "ALL0400": 99,
-            "ALL4018": 0,
-            "ALL4520": 0,
-            "ALL7120": 999,
-            "ALL7517": 999,
-            "ALL8020": 0,
-            "ALL8183": 0,
-            "ALL8220": 9999,
-            "ALL8225": 0,
-            "ALL8320": 0,
-            "ALM5072": 999999999,
-            "ALM6280": 999,
-            "ALS5400": 0,
-            "ALX8220": 9999,
-            "BCA7300": 999,
-            "BCA8370": -1,
-            "BCC5520": -1,
-            "BCN8220": -1,
-            "BCX7110": 999,
-            "CRU8320": 0,
-            "ILN8320": 9999,
-            "IQF9510": 0,
-            "IQT9425": 90,
-            "IQT9426": 90,
-            "IQT9510": 0,
-        }
-
-        # Lowercase maps for case-insensitive processing
-        self.feature_name_map = {f.lower(): f for f in self.feature_names}
-        self.default_map_lower = {k.lower(): v for k, v in self.default_map.items()}
-
-    def preprocess(self, X):
+ def preprocess(self, X):
         if isinstance(X, dict):
             X = pd.DataFrame([X])
         elif isinstance(X, list):
@@ -63,11 +7,8 @@ class LightGBMWrapper:
             X = pd.DataFrame(X)
 
         X = X.copy()
-
-        # Normalize input column names to lowercase
         X.columns = [str(col).strip().lower() for col in X.columns]
 
-        # Normalize null-like values
         X = X.replace(["", " ", "NULL", "null", "None"], np.nan)
 
         for col in X.columns:
@@ -76,30 +17,23 @@ class LightGBMWrapper:
 
         replaced_columns = []
 
-        # Add missing configured columns with defaults
         for feature_lower, default_value in self.default_map_lower.items():
             if feature_lower not in X.columns:
                 X[feature_lower] = default_value
 
-        # Replace null-like values only for configured columns
         for feature_lower, default_value in self.default_map_lower.items():
             if feature_lower in X.columns:
                 if X[feature_lower].isna().any():
                     replaced_columns.append(feature_lower)
                 X[feature_lower] = X[feature_lower].fillna(default_value)
 
-        # Ensure every model feature exists
-        for feature_lower, original_name in self.feature_name_map.items():
+        for feature_lower in self.feature_name_map:
             if feature_lower not in X.columns:
                 X[feature_lower] = np.nan
 
-        # Rename back to exact model feature names
         X = X.rename(columns=self.feature_name_map)
-
-        # Ensure exact model column order
         X = X[self.feature_names]
 
-        # Return replaced columns in original model/default casing where possible
         replaced_columns_original = [
             self.feature_name_map.get(col, col) if col in self.feature_name_map
             else next((k for k in self.default_map if k.lower() == col), col)
@@ -110,7 +44,6 @@ class LightGBMWrapper:
 
     def predict(self, X, feature_names=None):
         X_processed, replaced_columns = self.preprocess(X)
-
         raw = self.booster.predict(X_processed)
 
         if isinstance(raw, np.ndarray) and raw.ndim == 1:
@@ -126,41 +59,7 @@ class LightGBMWrapper:
             axis=1
         )
 
-        return {
-            "processed_input_df": X_processed,
-            "prediction_df": pred_df,
-            "result_df": result_df,
-            "replaced_columns": replaced_columns
-        }
+        self.last_processed = X_processed
+        self.last_replaced = replaced_columns
 
-
-# ============================================================
-# Example usage
-# ============================================================
-if __name__ == "__main__":
-    wrapper = LightGBMWrapper(MODEL_FILE_PATH)
-
-    sample_input = [
-        {
-            "clear_early_risk_score": None,
-            "loan_purpose": "NULL",
-            "au8220": "",
-            "all0400": 50,
-            "ALL4018": " ",
-            "iqt9425": np.nan
-        }
-    ]
-
-    output = wrapper.predict(sample_input)
-
-    print("\nReplaced columns:")
-    print(output["replaced_columns"])
-
-    print("\nProcessed input used for model:")
-    print(output["processed_input_df"])
-
-    print("\nPrediction only:")
-    print(output["prediction_df"])
-
-    print("\nFinal combined result:")
-    print(output["result_df"])
+        return result_df
