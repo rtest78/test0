@@ -1,19 +1,176 @@
-<xsl:when test="name() = 'CounterOfferReasonList' and counterOfferReason[*[normalize-space()]]">
-    <xsl:text>[</xsl:text>
+import os
+import lightgbm as lgb
+import pandas as pd
+import numpy as np
 
-    <xsl:for-each select="counterOfferReason[*[normalize-space()]]">
-        <xsl:text>{</xsl:text>
 
-        <xsl:call-template name="process-children">
-            <xsl:with-param name="nodes" select="*" />
-        </xsl:call-template>
+# ============================================================
+# Model path
+# ============================================================
+MODEL_FILE_PATH = "lgbm_model.txt"   # update with your model file name/path
 
-        <xsl:text>}</xsl:text>
 
-        <xsl:if test="position() != last()">
-            <xsl:text>,</xsl:text>
-        </xsl:if>
-    </xsl:for-each>
+# ============================================================
+# Wrapper class
+# ============================================================
+class LightGBMWrapper:
+    def __init__(self, model_path):
+        self.booster = lgb.Booster(model_file=model_path)
 
-    <xsl:text>]</xsl:text>
-</xsl:when>
+        # Get feature names from model
+        raw_feature_names = self.booster.feature_name()
+
+        if raw_feature_names and raw_feature_names[0] != "Column_0":
+            self.feature_names = raw_feature_names
+        else:
+            n = self.booster.num_feature()
+            self.feature_names = [f"feature_{i}" for i in range(n)]
+
+        # Hardcoded default values
+        self.default_map = {
+            "clear_early_risk_score": 300,
+            "loan_purpose": 1,
+            "AU8220": -1,
+            "ALL0400": 99,
+            "ALL4018": 0,
+            "ALL4520": 0,
+            "ALL7120": 999,
+            "ALL7517": 999,
+            "ALL8020": 0,
+            "ALL8183": 0,
+            "ALL8220": 9999,
+            "ALL8225": 0,
+            "ALL8320": 0,
+            "ALM5072": 999999999,
+            "ALM6280": 999,
+            "ALS5400": 0,
+            "ALX8220": 9999,
+            "BCA7300": 999,
+            "BCA8370": -1,
+            "BCC5520": -1,
+            "BCN8220": -1,
+            "BCX7110": 999,
+            "CRU8320": 0,
+            "ILN8320": 9999,
+            "IQF9510": 0,
+            "IQT9425": 90,
+            "IQT9426": 90,
+            "IQT9510": 0,
+        }
+
+    def preprocess(self, X):
+        # Convert input to DataFrame
+        if isinstance(X, dict):
+            X = pd.DataFrame([X])
+        elif isinstance(X, list):
+            X = pd.DataFrame(X)
+        elif not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X)
+
+        X = X.copy()
+
+        # Normalize null-like values
+        X = X.replace(
+            to_replace=["", " ", "NULL", "null", "None"],
+            value=np.nan
+        )
+
+        # Extra handling for object columns
+        for col in X.columns:
+            if X[col].dtype == "object":
+                X[col] = X[col].replace(
+                    ["", " ", "NULL", "null", "None"],
+                    np.nan
+                )
+
+        # Add missing columns with default values
+        for feature, default_value in self.default_map.items():
+            if feature not in X.columns:
+                X[feature] = default_value
+
+        # Replace null-like values only for configured default fields
+        replaced_columns = []
+        for feature, default_value in self.default_map.items():
+            if feature in X.columns:
+                if X[feature].isna().any():
+                    replaced_columns.append(feature)
+                X[feature] = X[feature].fillna(default_value)
+
+        # Ensure all model features exist
+        for feature in self.feature_names:
+            if feature not in X.columns:
+                X[feature] = np.nan
+
+        # Reorder columns exactly as model expects
+        X = X[self.feature_names]
+
+        return X, replaced_columns
+
+    def predict(self, X, feature_names=None):
+        X_processed, replaced_columns = self.preprocess(X)
+
+        raw = self.booster.predict(X_processed)
+
+        if isinstance(raw, np.ndarray) and raw.ndim == 1:
+            pred_df = pd.DataFrame(raw, columns=["output"])
+        else:
+            pred_df = pd.DataFrame(
+                raw,
+                columns=[f"output_{i}" for i in range(raw.shape[1])]
+            )
+
+        result = pd.concat(
+            [X_processed.reset_index(drop=True), pred_df.reset_index(drop=True)],
+            axis=1
+        )
+
+        return {
+            "result_df": result,
+            "processed_input_df": X_processed,
+            "prediction_df": pred_df,
+            "replaced_columns": replaced_columns
+        }
+
+
+# ============================================================
+# Load model
+# ============================================================
+wrapper = LightGBMWrapper(MODEL_FILE_PATH)
+print("Model loaded successfully.")
+print(f"Feature count: {len(wrapper.feature_names)}")
+
+
+# ============================================================
+# Example input
+# ============================================================
+X_sample = pd.DataFrame([
+    {
+        "clear_early_risk_score": None,
+        "loan_purpose": "NULL",
+        "AU8220": "",
+        "ALL0400": 50,
+        "ALL4018": " ",
+        "IQT9425": np.nan
+    }
+])
+
+print("\nOriginal input:")
+print(X_sample)
+
+
+# ============================================================
+# Predict
+# ============================================================
+prediction_output = wrapper.predict(X_sample)
+
+print("\nColumns where null-like values were replaced:")
+print(prediction_output["replaced_columns"])
+
+print("\nProcessed input used for model:")
+print(prediction_output["processed_input_df"])
+
+print("\nPrediction only:")
+print(prediction_output["prediction_df"])
+
+print("\nFinal combined output:")
+print(prediction_output["result_df"])
