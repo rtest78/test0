@@ -1,12 +1,5 @@
 # ============================================================
-# COMPLETE ONE-CELL CODE
-# - ClassPack-safe
-# - All model-related imports are inside the class
-# - Case-insensitive input mapping in the best way
-# - Replaces only null-like values for configured fields
-# - Returns prediction only (best for ClassPack)
-# - Processed input available in wrapped.last_processed
-# - Replaced columns available in wrapped.last_replaced
+# LightGBM Wrapper (NO LOWERCASE, EXACT MATCH)
 # ============================================================
 
 class LightGBMWrapper:
@@ -23,7 +16,7 @@ class LightGBMWrapper:
             n = self.booster.num_feature()
             self.feature_names = [f"feature_{i}" for i in range(n)]
 
-        # Defaults for fields that need replacement when input is null-like
+        # Default values (exact names only)
         self.default_map = {
             "clear_early_risk_score": 300,
             "loan_purpose": 1,
@@ -55,12 +48,6 @@ class LightGBMWrapper:
             "IQT9510": 0,
         }
 
-        # Best approach:
-        # map lowercased input names directly to exact model feature names
-        self.feature_name_map = {str(f).strip().lower(): f for f in self.feature_names}
-        self.default_map_lower = {str(k).strip().lower(): v for k, v in self.default_map.items()}
-
-        # Debug fields
         self.last_processed = None
         self.last_replaced = []
 
@@ -68,7 +55,7 @@ class LightGBMWrapper:
         import pandas as pd
         import numpy as np
 
-        # Convert input to DataFrame
+        # Convert input
         if isinstance(X, dict):
             X = pd.DataFrame([X])
         elif isinstance(X, list):
@@ -78,42 +65,35 @@ class LightGBMWrapper:
 
         X = X.copy()
 
-        # --------------------------------------------------------
-        # BEST WAY:
-        # map input columns directly to exact model feature names
-        # --------------------------------------------------------
-        X = X.rename(
-            columns=lambda c: self.feature_name_map.get(str(c).strip().lower(), c)
-        )
-
         # Normalize null-like values
         X = X.replace(["", " ", "NULL", "null", "None"], np.nan)
 
         replaced_columns = []
 
-        # Add missing configured fields with defaults
-        for feature_lower, default_value in self.default_map_lower.items():
-            feature = self.feature_name_map.get(feature_lower, feature_lower)
-            if feature not in X.columns:
-                X[feature] = default_value
+        # --------------------------------------------------------
+        # EXACT MATCH ONLY (NO LOWERCASE)
+        # --------------------------------------------------------
 
-        # Replace null-like values only for configured fields
-        for feature_lower, default_value in self.default_map_lower.items():
-            feature = self.feature_name_map.get(feature_lower, feature_lower)
-            if feature in X.columns:
-                if X[feature].isna().any():
-                    replaced_columns.append(feature)
-                X[feature] = X[feature].fillna(default_value)
+        # Add missing columns
+        for col, default_val in self.default_map.items():
+            if col not in X.columns:
+                X[col] = default_val
 
-        # Ensure all model features exist
-        for feature in self.feature_names:
-            if feature not in X.columns:
-                X[feature] = np.nan
+        # Replace null values
+        for col, default_val in self.default_map.items():
+            if col in X.columns:
+                if X[col].isna().any():
+                    replaced_columns.append(col)
+                X[col] = X[col].fillna(default_val)
 
-        # Enforce exact model feature order
+        # Ensure ALL model features exist
+        for col in self.feature_names:
+            if col not in X.columns:
+                X[col] = np.nan
+
+        # Enforce model column order
         X = X[self.feature_names]
 
-        # Save debug info
         self.last_processed = X.copy()
         self.last_replaced = replaced_columns
 
@@ -126,96 +106,124 @@ class LightGBMWrapper:
         X_processed = self.preprocess(X)
         raw = self.booster.predict(X_processed)
 
+        # Create prediction DataFrame
         if isinstance(raw, np.ndarray) and raw.ndim == 1:
-            out = pd.DataFrame(raw, columns=["output"])
+            pred_df = pd.DataFrame(raw, columns=["output"])
         else:
-            out = pd.DataFrame(
+            pred_df = pd.DataFrame(
                 raw,
                 columns=[f"output_{i}" for i in range(raw.shape[1])]
             )
 
-        out = out.reset_index(drop=True)
-        out.columns = [str(c) for c in out.columns]
-        return out
+        # --------------------------------------------------------
+        # FINAL OUTPUT: input used + prediction
+        # --------------------------------------------------------
+        result = pd.concat(
+            [X_processed.reset_index(drop=True),
+             pred_df.reset_index(drop=True)],
+            axis=1
+        )
+
+        return result
 
 
 # ============================================================
-# NOTE:
-# Keep your local model path here.
+# Setup
 # ============================================================
-MODEL_FILE_PATH = r"C:\Users\RR01785C\Downloads\loan_risk_model_notebooks\Models\model.txt"
 
-# Notebook-level imports are fine for notebook execution/debug.
 pd = __import__("pandas")
 np = __import__("numpy")
 os_mod = __import__("os")
 
-# Create wrapper
+MODEL_FILE_PATH = r"C:\Users\RR01785C\Downloads\loan_risk_model_notebooks\Models\model.txt"
+
 wrapped = LightGBMWrapper(MODEL_FILE_PATH)
-print("Wrapper created successfully.")
+
+print("Wrapper ready")
 print("Feature count:", len(wrapped.feature_names))
 
-# ============================================================
-# IMPORTANT FOR CLASSPACK:
-# Use a clean deterministic sample input with ALL model features.
-# Do not use random data, None, NULL, or blanks in sample_input.
-# ============================================================
-clean_row = {}
-for feature in wrapped.feature_names:
-    feature_lower = str(feature).strip().lower()
-    if feature_lower in wrapped.default_map_lower:
-        clean_row[feature] = wrapped.default_map_lower[feature_lower]
-    else:
-        clean_row[feature] = 0.0
 
-X_sample = pd.DataFrame([clean_row], columns=wrapped.feature_names)
+# ============================================================
+# Sample Input (can contain nulls / missing fields)
+# ============================================================
 
-print("\nSample input:")
+X_sample = pd.DataFrame([
+    {
+        "clear_early_risk_score": None,
+        "loan_purpose": None,
+        "AU8220": "",
+        "ALL0400": 50
+    }
+])
+
+print("\nInput:")
 display(X_sample)
 
-# Generate expected output
-y_sample = wrapped.predict(X_sample)
-y_sample = y_sample.reset_index(drop=True)
-y_sample.columns = [str(c) for c in y_sample.columns]
 
-print("\nProcessed input used for model:")
+# ============================================================
+# Predict
+# ============================================================
+
+y_sample = wrapped.predict(X_sample)
+
+print("\nProcessed Input:")
 display(wrapped.last_processed)
 
-print("\nReplaced columns:")
+print("\nReplaced Columns:")
 print(wrapped.last_replaced)
 
-print("\nSample output:")
+print("\nFinal Output (input + prediction):")
 display(y_sample)
 
-# Sanity check
-y_check = wrapped.predict(X_sample).reset_index(drop=True)
-y_check.columns = [str(c) for c in y_check.columns]
-print("\nEquality check:", y_sample.equals(y_check))
 
 # ============================================================
-# Prepare ClassPack
+# IMPORTANT FOR CLASSPACK
+# Use CLEAN input for validation (no nulls)
 # ============================================================
+
+clean_row = {}
+for f in wrapped.feature_names:
+    if f in wrapped.default_map:
+        clean_row[f] = wrapped.default_map[f]
+    else:
+        clean_row[f] = 0.0
+
+X_sample_clean = pd.DataFrame([clean_row])
+
+y_sample_clean = wrapped.predict(X_sample_clean)
+
+y_sample_clean = y_sample_clean.reset_index(drop=True)
+
+print("\nClean Input:")
+display(X_sample_clean)
+
+print("\nClean Output:")
+display(y_sample_clean)
+
+
+# ============================================================
+# ClassPack
+# ============================================================
+
 model_filename = os_mod.path.basename(MODEL_FILE_PATH)
 
 class_pack = ClassPack.prepare(
     clazz=LightGBMWrapper,
-    sample_input=X_sample,
-    sample_output=y_sample,
+    sample_input=X_sample_clean,
+    sample_output=y_sample_clean,
     predict_function_name="predict",
     init_kwargs={"model_path": model_filename},
 )
 
 class_pack.add_resource(model_filename, MODEL_FILE_PATH)
 
-print("\nClassPack prepared successfully.")
-print("Model resource registered:", model_filename)
+print("\nClassPack prepared")
+
 
 # ============================================================
 # Submit
-# These must already exist in your notebook:
-# MODEL_NAME, CATSP_URL, requirements, MODEL_DESCRIPTION,
-# DMP_TOKEN, MODEL_VERSION
 # ============================================================
+
 model_submission = class_pack.submit(
     name=MODEL_NAME,
     url=CATSP_URL,
@@ -226,4 +234,4 @@ model_submission = class_pack.submit(
     external_resources={"OMP_NUM_THREADS": "1"}
 )
 
-print("Submission initiated.")
+print("Submitted")
