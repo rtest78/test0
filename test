@@ -1,237 +1,45 @@
-# ============================================================
-# LightGBM Wrapper (NO LOWERCASE, EXACT MATCH)
-# ============================================================
+def predict(self, X, feature_names):
+    import pandas as pd
+    import numpy as np
 
-class LightGBMWrapper:
+    X_processed = self.preprocess(X, feature_names)
+    raw = self.booster.predict(X_processed)
 
-    def __init__(self, model_path):
-        import lightgbm as lgb
-
-        self.booster = lgb.Booster(model_file=model_path)
-
-        raw_feature_names = self.booster.feature_name()
-        if raw_feature_names and raw_feature_names[0] != "Column_0":
-            self.feature_names = raw_feature_names
-        else:
-            n = self.booster.num_feature()
-            self.feature_names = [f"feature_{i}" for i in range(n)]
-
-        # Default values (exact names only)
-        self.default_map = {
-            "clear_early_risk_score": 300,
-            "loan_purpose": 1,
-            "AU8220": -1,
-            "ALL0400": 99,
-            "ALL4018": 0,
-            "ALL4520": 0,
-            "ALL7120": 999,
-            "ALL7517": 999,
-            "ALL8020": 0,
-            "ALL8183": 0,
-            "ALL8220": 9999,
-            "ALL8225": 0,
-            "ALL8320": 0,
-            "ALM5072": 999999999,
-            "ALM6280": 999,
-            "ALS5400": 0,
-            "ALX8220": 9999,
-            "BCA7300": 999,
-            "BCA8370": -1,
-            "BCC5520": -1,
-            "BCN8220": -1,
-            "BCX7110": 999,
-            "CRU8320": 0,
-            "ILN8320": 9999,
-            "IQF9510": 0,
-            "IQT9425": 90,
-            "IQT9426": 90,
-            "IQT9510": 0,
-        }
-
-        self.last_processed = None
-        self.last_replaced = []
-
-    def preprocess(self, X):
-        import pandas as pd
-        import numpy as np
-
-        # Convert input
-        if isinstance(X, dict):
-            X = pd.DataFrame([X])
-        elif isinstance(X, list):
-            X = pd.DataFrame(X)
-        elif not isinstance(X, pd.DataFrame):
-            X = pd.DataFrame(X)
-
-        X = X.copy()
-
-        # Normalize null-like values
-        X = X.replace(["", " ", "NULL", "null", "None"], np.nan)
-
-        replaced_columns = []
-
-        # --------------------------------------------------------
-        # EXACT MATCH ONLY (NO LOWERCASE)
-        # --------------------------------------------------------
-
-        # Add missing columns
-        for col, default_val in self.default_map.items():
-            if col not in X.columns:
-                X[col] = default_val
-
-        # Replace null values
-        for col, default_val in self.default_map.items():
-            if col in X.columns:
-                if X[col].isna().any():
-                    replaced_columns.append(col)
-                X[col] = X[col].fillna(default_val)
-
-        # Ensure ALL model features exist
-        for col in self.feature_names:
-            if col not in X.columns:
-                X[col] = np.nan
-
-        # Enforce model column order
-        X = X[self.feature_names]
-
-        self.last_processed = X.copy()
-        self.last_replaced = replaced_columns
-
-        return X
-
-    def predict(self, X):
-        import pandas as pd
-        import numpy as np
-
-        X_processed = self.preprocess(X)
-        raw = self.booster.predict(X_processed)
-
-        # Create prediction DataFrame
-        if isinstance(raw, np.ndarray) and raw.ndim == 1:
-            pred_df = pd.DataFrame(raw, columns=["output"])
-        else:
-            pred_df = pd.DataFrame(
-                raw,
-                columns=[f"output_{i}" for i in range(raw.shape[1])]
-            )
-
-        # --------------------------------------------------------
-        # FINAL OUTPUT: input used + prediction
-        # --------------------------------------------------------
-        result = pd.concat(
-            [X_processed.reset_index(drop=True),
-             pred_df.reset_index(drop=True)],
-            axis=1
+    if isinstance(raw, np.ndarray) and raw.ndim == 1:
+        pred_df = pd.DataFrame(raw, columns=["output"])
+    else:
+        pred_df = pd.DataFrame(
+            raw,
+            columns=[f"output_{i}" for i in range(raw.shape[1])]
         )
 
-        return result
+    self.last_processed = X_processed
+
+    return pred_df
 
 
-# ============================================================
-# Setup
-# ============================================================
+def preprocess(self, X, feature_names):
+    import pandas as pd
+    import numpy as np
 
-pd = __import__("pandas")
-np = __import__("numpy")
-os_mod = __import__("os")
+    if isinstance(X, np.ndarray):
+        X = pd.DataFrame(X, columns=feature_names)
+    elif isinstance(X, dict):
+        X = pd.DataFrame([X])
+    elif isinstance(X, list):
+        X = pd.DataFrame(X)
+    elif not isinstance(X, pd.DataFrame):
+        X = pd.DataFrame(X, columns=feature_names)
 
-MODEL_FILE_PATH = r"C:\Users\RR01785C\Downloads\loan_risk_model_notebooks\Models\model.txt"
+    X = X.copy()
 
-wrapped = LightGBMWrapper(MODEL_FILE_PATH)
+    X = X.replace(["", " ", "NULL", "null", "None"], np.nan)
 
-print("Wrapper ready")
-print("Feature count:", len(wrapped.feature_names))
+    for col, default_val in self.default_map.items():
+        if col in X.columns:
+            X[col] = X[col].fillna(default_val)
 
+    X = X[feature_names]
 
-# ============================================================
-# Sample Input (can contain nulls / missing fields)
-# ============================================================
-
-X_sample = pd.DataFrame([
-    {
-        "clear_early_risk_score": None,
-        "loan_purpose": None,
-        "AU8220": "",
-        "ALL0400": 50
-    }
-])
-
-print("\nInput:")
-display(X_sample)
-
-
-# ============================================================
-# Predict
-# ============================================================
-
-y_sample = wrapped.predict(X_sample)
-
-print("\nProcessed Input:")
-display(wrapped.last_processed)
-
-print("\nReplaced Columns:")
-print(wrapped.last_replaced)
-
-print("\nFinal Output (input + prediction):")
-display(y_sample)
-
-
-# ============================================================
-# IMPORTANT FOR CLASSPACK
-# Use CLEAN input for validation (no nulls)
-# ============================================================
-
-clean_row = {}
-for f in wrapped.feature_names:
-    if f in wrapped.default_map:
-        clean_row[f] = wrapped.default_map[f]
-    else:
-        clean_row[f] = 0.0
-
-X_sample_clean = pd.DataFrame([clean_row])
-
-y_sample_clean = wrapped.predict(X_sample_clean)
-
-y_sample_clean = y_sample_clean.reset_index(drop=True)
-
-print("\nClean Input:")
-display(X_sample_clean)
-
-print("\nClean Output:")
-display(y_sample_clean)
-
-
-# ============================================================
-# ClassPack
-# ============================================================
-
-model_filename = os_mod.path.basename(MODEL_FILE_PATH)
-
-class_pack = ClassPack.prepare(
-    clazz=LightGBMWrapper,
-    sample_input=X_sample_clean,
-    sample_output=y_sample_clean,
-    predict_function_name="predict",
-    init_kwargs={"model_path": model_filename},
-)
-
-class_pack.add_resource(model_filename, MODEL_FILE_PATH)
-
-print("\nClassPack prepared")
-
-
-# ============================================================
-# Submit
-# ============================================================
-
-model_submission = class_pack.submit(
-    name=MODEL_NAME,
-    url=CATSP_URL,
-    requirements_txt=requirements,
-    description=MODEL_DESCRIPTION,
-    token=DMP_TOKEN,
-    asset_version=MODEL_VERSION,
-    external_resources={"OMP_NUM_THREADS": "1"}
-)
-
-print("Submitted")
+    self.last_processed = X.copy()
+    return X
