@@ -1,74 +1,135 @@
-def preprocess(self, X, feature_names):
-    import pandas as pd
-    import numpy as np
+class LightGBMWrapper:
 
-    if isinstance(X, np.ndarray):
-        X = pd.DataFrame(X, columns=feature_names)
-    elif isinstance(X, dict):
-        X = pd.DataFrame([X])
-    elif isinstance(X, list):
-        X = pd.DataFrame(X)
-    elif not isinstance(X, pd.DataFrame):
-        X = pd.DataFrame(X, columns=feature_names)
+    def __init__(self, model_path):
+        import lightgbm as lgb
 
-    X = X.copy()
+        self.booster = lgb.Booster(model_file=model_path)
 
-    # Build map: normalized model feature -> exact model feature
-    model_col_map = {
-        str(col).strip().lower(): col
-        for col in feature_names
-    }
+        self.default_map = {
+            "clear_early_risk_score": 300,
+            "loan_purpose": 1,
+            "AU8220": -1,
+            "ALL0400": 99,
+            "ALL4018": 0,
+            "ALL4520": 0,
+            "ALL7120": 999,
+            "ALL7517": 999,
+            "ALL8020": 0,
+            "ALL8183": 0,
+            "ALL8220": 9999,
+            "ALL8225": 0,
+            "ALL8320": 0,
+            "ALM5072": 999999999,
+            "ALM6280": 999,
+            "ALS5400": 0,
+            "ALX8220": 9999,
+            "BCA7300": 999,
+            "BCA8370": -1,
+            "BCC5520": -1,
+            "BCN8220": -1,
+            "BCX7110": 999,
+            "CRU8320": 0,
+            "ILN8320": 9999,
+            "IQF9510": 0,
+            "IQT9425": 90,
+            "IQT9426": 90,
+            "IQT9510": 0,
+        }
 
-    # Rename input columns to exact model feature names
-    rename_map = {}
-    for input_col in X.columns:
-        normalized_input_col = str(input_col).strip().lower()
+        self.last_processed = None
+        self.last_replacement_details = []
 
-        if normalized_input_col in model_col_map:
-            rename_map[input_col] = model_col_map[normalized_input_col]
+    def preprocess(self, X, feature_names):
+        import pandas as pd
+        import numpy as np
 
-    X = X.rename(columns=rename_map)
+        if isinstance(X, np.ndarray):
+            X = pd.DataFrame(X, columns=feature_names)
+        elif isinstance(X, dict):
+            X = pd.DataFrame([X])
+        elif isinstance(X, list):
+            X = pd.DataFrame(X)
+        elif not isinstance(X, pd.DataFrame):
+            X = pd.DataFrame(X, columns=feature_names)
 
-    # Normalize null-like values
-    X = X.replace(["", " ", "NULL", "null", "None"], np.nan)
+        X = X.copy()
 
-    # Replace nulls using defaults
-    for col, default_val in self.default_map.items():
-        if col in X.columns:
-            X[col] = X[col].fillna(default_val)
+        # Map input columns to exact model feature names using case-insensitive matching
+        model_col_map = {str(col).strip().lower(): col for col in feature_names}
 
-    # Add any missing model columns
-    for col in feature_names:
-        if col not in X.columns:
-            if col in self.default_map:
-                X[col] = self.default_map[col]
-            else:
-                X[col] = np.nan
+        rename_map = {}
+        for input_col in X.columns:
+            normalized_input_col = str(input_col).strip().lower()
+            if normalized_input_col in model_col_map:
+                rename_map[input_col] = model_col_map[normalized_input_col]
 
-    # Final exact order for model
-    X = X[feature_names]
+        X = X.rename(columns=rename_map)
 
-    self.last_processed = X.copy()
-    return X
+        # Normalize null-like values
+        X = X.replace(["", " ", "NULL", "null", "None"], np.nan)
 
+        replacement_details = []
 
+        # Replace nulls using defaults
+        for col, default_val in self.default_map.items():
+            if col in X.columns:
+                mask = X[col].isna()
 
+                if mask.any():
+                    replacement_details.append({
+                        "column": col,
+                        "default_value": default_val,
+                        "rows_replaced": mask[mask].index.tolist()
+                    })
 
+                X[col] = X[col].fillna(default_val)
 
-def predict(self, X, feature_names):
-    import pandas as pd
-    import numpy as np
+        # Add missing model columns
+        for col in feature_names:
+            if col not in X.columns:
+                if col in self.default_map:
+                    X[col] = self.default_map[col]
+                    replacement_details.append({
+                        "column": col,
+                        "default_value": self.default_map[col],
+                        "rows_replaced": "column_missing_all_rows"
+                    })
+                else:
+                    X[col] = np.nan
 
-    X_processed = self.preprocess(X, feature_names)
-    raw = self.booster.predict(X_processed)
+        # Exact model feature order
+        X = X[feature_names]
 
-    if isinstance(raw, np.ndarray) and raw.ndim == 1:
-        pred_df = pd.DataFrame(raw, columns=["output"])
-    else:
-        pred_df = pd.DataFrame(
-            raw,
-            columns=[f"output_{i}" for i in range(raw.shape[1])]
+        self.last_processed = X.copy()
+        self.last_replacement_details = replacement_details
+
+        return X
+
+    def predict(self, X, feature_names):
+        import pandas as pd
+        import numpy as np
+
+        X_processed = self.preprocess(X, feature_names)
+
+        raw = self.booster.predict(X_processed)
+
+        if isinstance(raw, np.ndarray) and raw.ndim == 1:
+            pred_df = pd.DataFrame(raw, columns=["output"])
+        else:
+            pred_df = pd.DataFrame(
+                raw,
+                columns=[f"output_{i}" for i in range(raw.shape[1])]
+            )
+
+        final_df = pd.concat(
+            [
+                X_processed.reset_index(drop=True),
+                pred_df.reset_index(drop=True)
+            ],
+            axis=1
         )
 
-    self.last_processed = X_processed
-    return pred_df
+        return final_df
+
+
+y_sample = wrapped.predict(X_sample, feature_names)
