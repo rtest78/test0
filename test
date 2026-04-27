@@ -1,3 +1,60 @@
+def preprocess(self, X, feature_names):
+    import pandas as pd
+    import numpy as np
+
+    if isinstance(X, np.ndarray):
+        X = pd.DataFrame(X, columns=feature_names)
+    elif isinstance(X, dict):
+        X = pd.DataFrame([X])
+    elif isinstance(X, list):
+        X = pd.DataFrame(X)
+    elif not isinstance(X, pd.DataFrame):
+        X = pd.DataFrame(X, columns=feature_names)
+
+    X = X.copy()
+
+    # Build map: normalized model feature -> exact model feature
+    model_col_map = {
+        str(col).strip().lower(): col
+        for col in feature_names
+    }
+
+    # Rename input columns to exact model feature names
+    rename_map = {}
+    for input_col in X.columns:
+        normalized_input_col = str(input_col).strip().lower()
+
+        if normalized_input_col in model_col_map:
+            rename_map[input_col] = model_col_map[normalized_input_col]
+
+    X = X.rename(columns=rename_map)
+
+    # Normalize null-like values
+    X = X.replace(["", " ", "NULL", "null", "None"], np.nan)
+
+    # Replace nulls using defaults
+    for col, default_val in self.default_map.items():
+        if col in X.columns:
+            X[col] = X[col].fillna(default_val)
+
+    # Add any missing model columns
+    for col in feature_names:
+        if col not in X.columns:
+            if col in self.default_map:
+                X[col] = self.default_map[col]
+            else:
+                X[col] = np.nan
+
+    # Final exact order for model
+    X = X[feature_names]
+
+    self.last_processed = X.copy()
+    return X
+
+
+
+
+
 def predict(self, X, feature_names):
     import pandas as pd
     import numpy as np
@@ -14,32 +71,4 @@ def predict(self, X, feature_names):
         )
 
     self.last_processed = X_processed
-
     return pred_df
-
-
-def preprocess(self, X, feature_names):
-    import pandas as pd
-    import numpy as np
-
-    if isinstance(X, np.ndarray):
-        X = pd.DataFrame(X, columns=feature_names)
-    elif isinstance(X, dict):
-        X = pd.DataFrame([X])
-    elif isinstance(X, list):
-        X = pd.DataFrame(X)
-    elif not isinstance(X, pd.DataFrame):
-        X = pd.DataFrame(X, columns=feature_names)
-
-    X = X.copy()
-
-    X = X.replace(["", " ", "NULL", "null", "None"], np.nan)
-
-    for col, default_val in self.default_map.items():
-        if col in X.columns:
-            X[col] = X[col].fillna(default_val)
-
-    X = X[feature_names]
-
-    self.last_processed = X.copy()
-    return X
