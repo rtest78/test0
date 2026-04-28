@@ -1,135 +1,161 @@
-class LightGBMWrapper:
+# MLX Model REST API – End-to-End Usage
 
-    def __init__(self, model_path):
-        import lightgbm as lgb
+## Overview
 
-        self.booster = lgb.Booster(model_file=model_path)
+The MLX model is exposed as a REST service. To invoke the model:
 
-        self.default_map = {
-            "clear_early_risk_score": 300,
-            "loan_purpose": 1,
-            "AU8220": -1,
-            "ALL0400": 99,
-            "ALL4018": 0,
-            "ALL4520": 0,
-            "ALL7120": 999,
-            "ALL7517": 999,
-            "ALL8020": 0,
-            "ALL8183": 0,
-            "ALL8220": 9999,
-            "ALL8225": 0,
-            "ALL8320": 0,
-            "ALM5072": 999999999,
-            "ALM6280": 999,
-            "ALS5400": 0,
-            "ALX8220": 9999,
-            "BCA7300": 999,
-            "BCA8370": -1,
-            "BCC5520": -1,
-            "BCN8220": -1,
-            "BCX7110": 999,
-            "CRU8320": 0,
-            "ILN8320": 9999,
-            "IQF9510": 0,
-            "IQT9425": 90,
-            "IQT9426": 90,
-            "IQT9510": 0,
-        }
+1. Call the **Token Service** to get an access token
+2. Use the token in the **Authorization header**
+3. Call the **MLX Model URL** with input payload
 
-        self.last_processed = None
-        self.last_replacement_details = []
+---
 
-    def preprocess(self, X, feature_names):
-        import pandas as pd
-        import numpy as np
+## Token Service (Get Access Token)
 
-        if isinstance(X, np.ndarray):
-            X = pd.DataFrame(X, columns=feature_names)
-        elif isinstance(X, dict):
-            X = pd.DataFrame([X])
-        elif isinstance(X, list):
-            X = pd.DataFrame(X)
-        elif not isinstance(X, pd.DataFrame):
-            X = pd.DataFrame(X, columns=feature_names)
+**Method:** POST
+**URL:** `<ADD_TOKEN_SERVICE_URL_HERE>`
 
-        X = X.copy()
+### Headers
 
-        # Map input columns to exact model feature names using case-insensitive matching
-        model_col_map = {str(col).strip().lower(): col for col in feature_names}
+```
+Content-Type: application/json
+```
 
-        rename_map = {}
-        for input_col in X.columns:
-            normalized_input_col = str(input_col).strip().lower()
-            if normalized_input_col in model_col_map:
-                rename_map[input_col] = model_col_map[normalized_input_col]
+### Request Body
 
-        X = X.rename(columns=rename_map)
+```json
+{
+  "clientId": "<ADD_CLIENT_ID_HERE>",
+  "secret": "<ADD_SECRET_HERE>"
+}
+```
 
-        # Normalize null-like values
-        X = X.replace(["", " ", "NULL", "null", "None"], np.nan)
+### cURL Example
 
-        replacement_details = []
+```bash
+curl --location '<ADD_TOKEN_SERVICE_URL_HERE>' \
+--header 'Content-Type: application/json' \
+--data '{
+  "clientId": "<ADD_CLIENT_ID_HERE>",
+  "secret": "<ADD_SECRET_HERE>"
+}'
+```
 
-        # Replace nulls using defaults
-        for col, default_val in self.default_map.items():
-            if col in X.columns:
-                mask = X[col].isna()
+### Sample Response
 
-                if mask.any():
-                    replacement_details.append({
-                        "column": col,
-                        "default_value": default_val,
-                        "rows_replaced": mask[mask].index.tolist()
-                    })
+```json
+{
+  "access_token": "eyJhbGciOi...",
+  "expires_in": 3600,
+  "token_type": "Bearer"
+}
+```
 
-                X[col] = X[col].fillna(default_val)
+👉 Use the value of `access_token` for the next step.
 
-        # Add missing model columns
-        for col in feature_names:
-            if col not in X.columns:
-                if col in self.default_map:
-                    X[col] = self.default_map[col]
-                    replacement_details.append({
-                        "column": col,
-                        "default_value": self.default_map[col],
-                        "rows_replaced": "column_missing_all_rows"
-                    })
-                else:
-                    X[col] = np.nan
+---
 
-        # Exact model feature order
-        X = X[feature_names]
+## MLX Model Invocation
 
-        self.last_processed = X.copy()
-        self.last_replacement_details = replacement_details
+**Method:** POST
+**URL:** `<ADD_MODEL_SERVICE_URL_HERE>`
 
-        return X
+### Headers
 
-    def predict(self, X, feature_names):
-        import pandas as pd
-        import numpy as np
+```
+Content-Type: application/json
+Authorization: Bearer <ACCESS_TOKEN>
+```
 
-        X_processed = self.preprocess(X, feature_names)
+### Request Body Example
 
-        raw = self.booster.predict(X_processed)
+```json
+{
+  "clear_early_risk_score": 300,
+  "loan_purpose": 1,
+  "AU8220": -1,
+  "ALL0400": 99
+}
+```
 
-        if isinstance(raw, np.ndarray) and raw.ndim == 1:
-            pred_df = pd.DataFrame(raw, columns=["output"])
-        else:
-            pred_df = pd.DataFrame(
-                raw,
-                columns=[f"output_{i}" for i in range(raw.shape[1])]
-            )
+### cURL Example
 
-        final_df = pd.concat(
-            [
-                X_processed.reset_index(drop=True),
-                pred_df.reset_index(drop=True)
-            ],
-            axis=1
-        )
+```bash
+curl --location '<ADD_MODEL_SERVICE_URL_HERE>' \
+--header 'Content-Type: application/json' \
+--header 'Authorization: Bearer <ACCESS_TOKEN>' \
+--data '{
+  "clear_early_risk_score": 300,
+  "loan_purpose": 1,
+  "AU8220": -1,
+  "ALL0400": 99
+}'
+```
 
-        return final_df
+---
 
+## Sample Response
 
-y_sample = wrapped.predict(X_sample, feature_names)
+### Prediction Only
+
+```json
+{
+  "output": 0.73452
+}
+```
+
+### Input + Prediction (if enabled)
+
+```json
+{
+  "clear_early_risk_score": 300,
+  "loan_purpose": 1,
+  "AU8220": -1,
+  "ALL0400": 99,
+  "output": 0.73452
+}
+```
+
+---
+
+## Important Notes
+
+* Always include:
+
+  ```
+  Authorization: Bearer <ACCESS_TOKEN>
+  ```
+* Do not omit the word **Bearer**
+* Token expires → call token service again
+* Ensure JSON payload matches model input fields
+
+---
+
+## Common Errors
+
+### 401 Unauthorized
+
+* Missing Authorization header
+* Invalid or expired token
+* Missing "Bearer" prefix
+
+### 400 Bad Request
+
+* Invalid JSON
+* Missing required fields
+
+### 500 Internal Server Error
+
+* Service issue or invalid input format
+
+---
+
+## End-to-End Flow
+
+```
+1. Call Token Service
+2. Extract access_token
+3. Add Authorization header
+4. Call MLX Model API
+5. Receive prediction response
+```
