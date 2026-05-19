@@ -4,13 +4,7 @@ class LightGBMWrapper:
 
         self.booster = lgb.Booster(model_file=model_path)
 
-        raw_feature_names = self.booster.feature_name()
-        if raw_feature_names and raw_feature_names[0] != "Column_0":
-            self.feature_names = raw_feature_names
-        else:
-            self.feature_names = [
-                f"feature_{i}" for i in range(self.booster.num_feature())
-            ]
+        self.feature_names = self.booster.feature_name()
 
         self.missing_imputation_map = {
             "CCA_AMT_OF_LOANS_PD_OFF": 99999999999,
@@ -50,14 +44,12 @@ class LightGBMWrapper:
             "T11_TREV0385_ABS": "T11_TREV0385",
         }
 
-        self.required_source_cols = [
-            "CCA_AMT_OF_LOANS_PD_OFF",
-            "T11_TBCA3303",
-            "T11_TBCC1303",
-            "T11_TBCC2303",
-            "T11_TREV0384",
-            "T11_TREV0385",
-        ]
+    def _find_col(self, columns, target_col):
+        target = str(target_col).strip().lower()
+        for col in columns:
+            if str(col).strip().lower() == target:
+                return col
+        return None
 
     def preprocess(self, X, feature_names=None):
         import pandas as pd
@@ -77,63 +69,59 @@ class LightGBMWrapper:
 
         X = X.copy()
 
-        all_expected_cols = list(feature_names) + self.required_source_cols
-
-        input_col_map = {
-            str(col).strip().lower(): col
-            for col in X.columns
-        }
-
-        rename_map = {}
-        for expected_col in all_expected_cols:
-            key = str(expected_col).strip().lower()
-            if key in input_col_map:
-                rename_map[input_col_map[key]] = expected_col
-
-        X = X.rename(columns=rename_map)
-
         X = X.replace(["", " ", "NULL", "null", "None", "none"], np.nan)
 
         for col in X.columns:
             X[col] = pd.to_numeric(X[col], errors="ignore")
 
-        # Step 1: Missing imputation
-        for col, impute_val in self.missing_imputation_map.items():
-            if col in X.columns:
-                X[col] = X[col].fillna(impute_val)
+        # Step 1: Missing imputation - case-insensitive
+        for expected_col, impute_val in self.missing_imputation_map.items():
+            actual_col = self._find_col(X.columns, expected_col)
+            if actual_col is not None:
+                X[actual_col] = X[actual_col].fillna(impute_val)
 
-        # Step 2: Default value replacement
-        for col, replacement_map in self.default_replacement_map.items():
-            if col in X.columns:
-                X[col] = X[col].replace(replacement_map)
+        # Step 2: Default value replacement - case-insensitive
+        for expected_col, replacement_map in self.default_replacement_map.items():
+            actual_col = self._find_col(X.columns, expected_col)
+            if actual_col is not None:
+                X[actual_col] = X[actual_col].replace(replacement_map)
 
-        # Step 3: ABS derived features
+        # Step 3: ABS derived features - source and target both case-insensitive
         for derived_col, source_col in self.derived_feature_map.items():
-            if derived_col in feature_names:
-                if source_col in X.columns:
-                    X[source_col] = pd.to_numeric(X[source_col], errors="coerce")
-                    X[derived_col] = X[source_col].abs()
-                else:
+            source_actual = self._find_col(X.columns, source_col)
+            target_actual = self._find_col(feature_names, derived_col)
+
+            if target_actual is not None:
+                if source_actual is None:
                     raise ValueError(
-                        f"Model requires '{derived_col}', but source column "
+                        f"Model requires '{target_actual}', but source column "
                         f"'{source_col}' is missing from input."
                     )
 
-        # Step 4: Paid-off loan amount derived feature
-        if "CCA_AMT_OF_LOANS_PD_OFF" in X.columns:
-            X["CCA_AMT_OF_LOANS_PD_OFF"] = pd.to_numeric(
-                X["CCA_AMT_OF_LOANS_PD_OFF"],
-                errors="coerce"
+                X[source_actual] = pd.to_numeric(X[source_actual], errors="coerce")
+                X[target_actual] = X[source_actual].abs()
+
+        # Step 4: Paid-off loan amount derived feature - case-insensitive
+        source_actual = self._find_col(X.columns, "CCA_AMT_OF_LOANS_PD_OFF")
+        target_actual = self._find_col(feature_names, "CCA_AMT_OF_LOANS_PD_OFF_0")
+
+        if target_actual is not None:
+            if source_actual is None:
+                raise ValueError(
+                    f"Model requires '{target_actual}', but source column "
+                    "'CCA_AMT_OF_LOANS_PD_OFF' is missing from input."
+                )
+
+            X[source_actual] = pd.to_numeric(X[source_actual], errors="coerce")
+
+            X[target_actual] = X[source_actual].apply(
+                lambda x: 4500 if x == 0 else x
             )
 
-            X["CCA_AMT_OF_LOANS_PD_OFF_0"] = X[
-                "CCA_AMT_OF_LOANS_PD_OFF"
-            ].apply(lambda x: 4500 if x == 0 else x)
-
-        # Step 5: Add any missing model columns
-        for col in feature_names:
-            if col not in X.columns:
-                X[col] = 0
+        # Step 5: Add missing model columns using actual model feature names
+        for model_col in feature_names:
+            if model_col not in X.columns:
+                X[model_col] = 0
 
         return X[feature_names]
 
