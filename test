@@ -8,7 +8,9 @@ class LightGBMWrapper:
         if raw_feature_names and raw_feature_names[0] != "Column_0":
             self.feature_names = raw_feature_names
         else:
-            self.feature_names = [f"feature_{i}" for i in range(self.booster.num_feature())]
+            self.feature_names = [
+                f"feature_{i}" for i in range(self.booster.num_feature())
+            ]
 
         self.missing_imputation_map = {
             "CCA_AMT_OF_LOANS_PD_OFF": 99999999999,
@@ -48,6 +50,15 @@ class LightGBMWrapper:
             "T11_TREV0385_ABS": "T11_TREV0385",
         }
 
+        self.required_source_cols = [
+            "CCA_AMT_OF_LOANS_PD_OFF",
+            "T11_TBCA3303",
+            "T11_TBCC1303",
+            "T11_TBCC2303",
+            "T11_TREV0384",
+            "T11_TREV0385",
+        ]
+
     def preprocess(self, X, feature_names=None):
         import pandas as pd
         import numpy as np
@@ -66,13 +77,18 @@ class LightGBMWrapper:
 
         X = X.copy()
 
-        input_col_map = {str(col).strip().lower(): col for col in X.columns}
+        all_expected_cols = list(feature_names) + self.required_source_cols
+
+        input_col_map = {
+            str(col).strip().lower(): col
+            for col in X.columns
+        }
 
         rename_map = {}
-        for model_col in feature_names:
-            key = str(model_col).strip().lower()
+        for expected_col in all_expected_cols:
+            key = str(expected_col).strip().lower()
             if key in input_col_map:
-                rename_map[input_col_map[key]] = model_col
+                rename_map[input_col_map[key]] = expected_col
 
         X = X.rename(columns=rename_map)
 
@@ -91,10 +107,11 @@ class LightGBMWrapper:
             if col in X.columns:
                 X[col] = X[col].replace(replacement_map)
 
-        # Step 3: Derived ABS features
+        # Step 3: ABS derived features
         for derived_col, source_col in self.derived_feature_map.items():
             if derived_col in feature_names:
                 if source_col in X.columns:
+                    X[source_col] = pd.to_numeric(X[source_col], errors="coerce")
                     X[derived_col] = X[source_col].abs()
                 else:
                     raise ValueError(
@@ -102,18 +119,18 @@ class LightGBMWrapper:
                         f"'{source_col}' is missing from input."
                     )
 
-        # Step 4: Derived paid-off loan amount feature
-        if "CCA_AMT_OF_LOANS_PD_OFF_0" in feature_names:
-            if "CCA_AMT_OF_LOANS_PD_OFF" in X.columns:
-                X["CCA_AMT_OF_LOANS_PD_OFF_0"] = X["CCA_AMT_OF_LOANS_PD_OFF"].apply(
-                    lambda x: 4500 if x == 0 else x
-                )
-            else:
-                raise ValueError(
-                    "Model requires 'CCA_AMT_OF_LOANS_PD_OFF_0', but source "
-                    "column 'CCA_AMT_OF_LOANS_PD_OFF' is missing from input."
-                )
+        # Step 4: Paid-off loan amount derived feature
+        if "CCA_AMT_OF_LOANS_PD_OFF" in X.columns:
+            X["CCA_AMT_OF_LOANS_PD_OFF"] = pd.to_numeric(
+                X["CCA_AMT_OF_LOANS_PD_OFF"],
+                errors="coerce"
+            )
 
+            X["CCA_AMT_OF_LOANS_PD_OFF_0"] = X[
+                "CCA_AMT_OF_LOANS_PD_OFF"
+            ].apply(lambda x: 4500 if x == 0 else x)
+
+        # Step 5: Add any missing model columns
         for col in feature_names:
             if col not in X.columns:
                 X[col] = 0
@@ -132,7 +149,10 @@ class LightGBMWrapper:
         probability = np.asarray(self.booster.predict(X_processed))
         probability = np.clip(probability, 1e-15, 1 - 1e-15)
 
-        score = 480 + (30 / np.log(2)) * np.log((1 - probability) / probability)
+        score = 480 + (30 / np.log(2)) * np.log(
+            (1 - probability) / probability
+        )
+
         score2 = np.round(score)
 
         final_score = np.where(
@@ -147,6 +167,9 @@ class LightGBMWrapper:
         })
 
         return pd.concat(
-            [X_processed.reset_index(drop=True), pred_df.reset_index(drop=True)],
+            [
+                X_processed.reset_index(drop=True),
+                pred_df.reset_index(drop=True)
+            ],
             axis=1
         )
