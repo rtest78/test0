@@ -2,54 +2,79 @@ class LightGBMWrapper:
     def __init__(self, model_path):
         import lightgbm as lgb
 
-        self.booster = lgb.Booster(model_file=model_path)
+        self.wrapper_version = "debug_v5_rows_payload_fix"
 
+        self.booster = lgb.Booster(model_file=model_path)
         self.feature_names = self.booster.feature_name()
 
         self.missing_imputation_map = {
-            "CCA_AMT_OF_LOANS_PD_OFF": 99999999999,
-            "CCA_CCA_INQ_180_DAYS": -1,
-            "CCA_CCI_INQ_3_YRS": -1,
-            "CCA_NUM_BANKACCTS": -1,
-            "CCA_RPT_NMI_PRV_SEEN": 99999999999,
-            "FA_INQ_365_DAYS": -1,
-            "ALL4018": 999,
-            "ALL4520": 99,
-            "ALL7120": 999,
-            "ALL7320": 999,
-            "ALL7519": 999,
-            "ALL7938": 999,
-            "ALL8020": 999999,
-            "ALL8150": 9999,
-            "ALL8183": 9999,
-            "ALL8321": 9999,
-            "T11_TUPL1705": 999999999,
+            "cca_amt_of_loans_pd_off": 99999999999,
+            "cca_cca_inq_180_days": -1,
+            "cca_cci_inq_3_yrs": -1,
+            "cca_num_bankaccts": -1,
+            "cca_rpt_nmi_prv_seen": 99999999999,
+            "fa_inq_365_days": -1,
+            "premier_v1_2_all4018": 999,
+            "premier_v1_2_all4520": 99,
+            "premier_v1_2_all7120": 999,
+            "premier_v1_2_all7320": 999,
+            "premier_v1_2_all7519": 999,
+            "premier_v1_2_all7938": 999,
+            "premier_v1_2_all8020": 999999,
+            "premier_v1_2_all8150": 9999,
+            "premier_v1_2_all8183": 9999,
+            "premier_v1_2_all8321": 9999,
+            "t11_tupl1705": 999999999,
         }
 
         self.default_replacement_map = {
-            "ALL4018": {999: -1},
-            "ALL4520": {99: -1},
-            "ALL7938": {994: -1, 997: -2, 999: -3},
-            "ALL8020": {999994: -1, 999996: -2, 999999: -3},
-            "ALL8150": {9996: 50, 9999: -2},
-            "ALL8183": {9999: -2},
-            "ALL8321": {9999: -3, 9996: -2, 9994: -1},
+            "premier_v1_2_all4018": {999: -1},
+            "premier_v1_2_all4520": {99: -1},
+            "premier_v1_2_all7938": {994: -1, 997: -2, 999: -3},
+            "premier_v1_2_all8020": {999994: -1, 999996: -2, 999999: -3},
+            "premier_v1_2_all8150": {9996: 50, 9999: -2},
+            "premier_v1_2_all8183": {9999: -2},
+            "premier_v1_2_all8321": {9999: -3, 9996: -2, 9994: -1},
         }
 
         self.derived_feature_map = {
-            "T11_TBCA3303_ABS": "T11_TBCA3303",
-            "T11_TBCC1303_ABS": "T11_TBCC1303",
-            "T11_TBCC2303_ABS": "T11_TBCC2303",
-            "T11_TREV0384_ABS": "T11_TREV0384",
-            "T11_TREV0385_ABS": "T11_TREV0385",
+            "t11_tbca3303_abs": "t11_tbca3303",
+            "t11_tbcc1303_abs": "t11_tbcc1303",
+            "t11_tbcc2303_abs": "t11_tbcc2303",
+            "t11_trev0384_abs": "t11_trev0384",
+            "t11_trev0385_abs": "t11_trev0385",
         }
 
-    def _find_col(self, columns, target_col):
+    def find_col(self, columns, target_col):
         target = str(target_col).strip().lower()
         for col in columns:
             if str(col).strip().lower() == target:
                 return col
         return None
+
+    def to_dataframe(self, X):
+        import pandas as pd
+        import numpy as np
+
+        if isinstance(X, dict):
+            if "rows" in X:
+                return pd.DataFrame(X["rows"])
+
+            if "data" in X and isinstance(X["data"], dict) and "rows" in X["data"]:
+                return pd.DataFrame(X["data"]["rows"])
+
+            return pd.DataFrame([X])
+
+        if isinstance(X, list):
+            return pd.DataFrame(X)
+
+        if isinstance(X, np.ndarray):
+            return pd.DataFrame(X)
+
+        if isinstance(X, pd.DataFrame):
+            return X.copy()
+
+        return pd.DataFrame(X)
 
     def preprocess(self, X, feature_names=None):
         import pandas as pd
@@ -58,38 +83,32 @@ class LightGBMWrapper:
         if feature_names is None:
             feature_names = self.feature_names
 
-        if isinstance(X, dict):
-            X = pd.DataFrame([X])
-        elif isinstance(X, list):
-            X = pd.DataFrame(X)
-        elif isinstance(X, np.ndarray):
-            X = pd.DataFrame(X)
-        elif not isinstance(X, pd.DataFrame):
-            X = pd.DataFrame(X)
-
+        X = self.to_dataframe(X)
         X = X.copy()
+
+        X.columns = [str(c).strip() for c in X.columns]
 
         X = X.replace(["", " ", "NULL", "null", "None", "none"], np.nan)
 
         for col in X.columns:
             X[col] = pd.to_numeric(X[col], errors="ignore")
 
-        # Step 1: Missing imputation - case-insensitive
+        # Step 1: Missing imputation
         for expected_col, impute_val in self.missing_imputation_map.items():
-            actual_col = self._find_col(X.columns, expected_col)
+            actual_col = self.find_col(X.columns, expected_col)
             if actual_col is not None:
                 X[actual_col] = X[actual_col].fillna(impute_val)
 
-        # Step 2: Default value replacement - case-insensitive
+        # Step 2: Default value replacement
         for expected_col, replacement_map in self.default_replacement_map.items():
-            actual_col = self._find_col(X.columns, expected_col)
+            actual_col = self.find_col(X.columns, expected_col)
             if actual_col is not None:
                 X[actual_col] = X[actual_col].replace(replacement_map)
 
-        # Step 3: ABS derived features - source and target both case-insensitive
+        # Step 3: ABS derived features
         for derived_col, source_col in self.derived_feature_map.items():
-            source_actual = self._find_col(X.columns, source_col)
-            target_actual = self._find_col(feature_names, derived_col)
+            source_actual = self.find_col(X.columns, source_col)
+            target_actual = self.find_col(feature_names, derived_col)
 
             if target_actual is not None:
                 if source_actual is None:
@@ -101,15 +120,15 @@ class LightGBMWrapper:
                 X[source_actual] = pd.to_numeric(X[source_actual], errors="coerce")
                 X[target_actual] = X[source_actual].abs()
 
-        # Step 4: Paid-off loan amount derived feature - case-insensitive
-        source_actual = self._find_col(X.columns, "CCA_AMT_OF_LOANS_PD_OFF")
-        target_actual = self._find_col(feature_names, "CCA_AMT_OF_LOANS_PD_OFF_0")
+        # Step 4: Paid-off loan amount derived feature
+        source_actual = self.find_col(X.columns, "cca_amt_of_loans_pd_off")
+        target_actual = self.find_col(feature_names, "cca_amt_of_loans_pd_off_0")
 
         if target_actual is not None:
             if source_actual is None:
                 raise ValueError(
                     f"Model requires '{target_actual}', but source column "
-                    "'CCA_AMT_OF_LOANS_PD_OFF' is missing from input."
+                    "'cca_amt_of_loans_pd_off' is missing from input."
                 )
 
             X[source_actual] = pd.to_numeric(X[source_actual], errors="coerce")
@@ -118,29 +137,27 @@ class LightGBMWrapper:
                 lambda x: 4500 if x == 0 else x
             )
 
-        # Step 5: Add missing model columns using actual model feature names
+        # Step 5: Add missing model columns
         for model_col in feature_names:
             if model_col not in X.columns:
                 X[model_col] = 0
 
         return X[feature_names]
 
-    def predict(self, X, feature_names=None):
+    def predict(self, X):
         import pandas as pd
         import numpy as np
 
-        if feature_names is None:
-            feature_names = self.feature_names
+        input_df = self.to_dataframe(X)
+        input_df.columns = [str(c).strip() for c in input_df.columns]
 
+        feature_names = self.feature_names
         X_processed = self.preprocess(X, feature_names)
 
         probability = np.asarray(self.booster.predict(X_processed))
         probability = np.clip(probability, 1e-15, 1 - 1e-15)
 
-        score = 480 + (30 / np.log(2)) * np.log(
-            (1 - probability) / probability
-        )
-
+        score = 480 + (30 / np.log(2)) * np.log((1 - probability) / probability)
         score2 = np.round(score)
 
         final_score = np.where(
@@ -150,13 +167,16 @@ class LightGBMWrapper:
         ).astype(int)
 
         pred_df = pd.DataFrame({
+            "version": [self.wrapper_version] * len(probability),
             "probability": probability,
-            "score": final_score
+            "score": final_score,
+            "debug_input_cols": [",".join(input_df.columns.astype(str))] * len(probability),
+            "debug_processed_sum": X_processed.sum(axis=1).values,
         })
 
         return pd.concat(
             [
-                X_processed.reset_index(drop=True),
+                input_df.reset_index(drop=True),
                 pred_df.reset_index(drop=True)
             ],
             axis=1
