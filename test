@@ -1,13 +1,22 @@
- # ------------------------------------------------------------
-        # Model feature names
-        # ------------------------------------------------------------
-        raw_feature_names = self.booster.feature_name()
+# ------------------------------------------------------------
+# Internal Clarity flag
+#
+# If clarity_hit_flag is not part of input, default to no-hit.
+# 1 = Clarity hit
+# 0 = Clarity no-hit
+# ------------------------------------------------------------
+clarity_hit_col = self.find_col(X.columns, "clarity_hit_flag")
 
-        if raw_feature_names and len(raw_feature_names) > 0 and str(raw_feature_names[0]).strip().lower() != "column_0":
-            self.model_feature_names = [str(c).strip() for c in raw_feature_names]
-        else:
-            n = self.booster.num_feature()
-            self.model_feature_names = [f"feature_{i}" for i in range(n)]
+if clarity_hit_col is None:
+    X["_internal_clarity_hit_flag"] = 0
+    clarity_hit_col = "_internal_clarity_hit_flag"
+else:
+    X[clarity_hit_col] = pd.to_numeric(
+        X[clarity_hit_col],
+        errors="coerce"
+    ).fillna(0)
 
-        # Keep this also, since some of your other code uses feature_names
-        self.feature_names = self.model_feature_names
+# Only exact 1 means hit. Everything else is no-hit.
+X[clarity_hit_col] = X[clarity_hit_col].apply(
+    lambda v: 1 if v == 1 else 0
+)
