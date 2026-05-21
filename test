@@ -2,8 +2,6 @@ class LightGBMWrapper:
     def __init__(self, model_path):
         import lightgbm as lgb
 
-        self.wrapper_version = "debug_v5_rows_payload_fix"
-
         self.booster = lgb.Booster(model_file=model_path)
         self.feature_names = self.booster.feature_name()
 
@@ -47,51 +45,60 @@ class LightGBMWrapper:
 
     def find_col(self, columns, target_col):
         target = str(target_col).strip().lower()
+
         for col in columns:
             if str(col).strip().lower() == target:
                 return col
+
         return None
 
-    def to_dataframe(self, X):
+    def preprocess(self, X, feature_names):
         import pandas as pd
         import numpy as np
 
-        if isinstance(X, dict):
-            if "rows" in X:
-                return pd.DataFrame(X["rows"])
-
-            if "data" in X and isinstance(X["data"], dict) and "rows" in X["data"]:
-                return pd.DataFrame(X["data"]["rows"])
-
-            return pd.DataFrame([X])
-
-        if isinstance(X, list):
-            return pd.DataFrame(X)
-
-        if isinstance(X, np.ndarray):
-            return pd.DataFrame(X)
-
+        # Convert input to dataframe without changing original schema
         if isinstance(X, pd.DataFrame):
-            return X.copy()
+            X = X.copy()
 
-        return pd.DataFrame(X)
+        elif isinstance(X, dict):
+            if "rows" in X:
+                X = pd.DataFrame(X["rows"])
+            else:
+                X = pd.DataFrame([X])
 
-    def preprocess(self, X, feature_names=None):
-        import pandas as pd
-        import numpy as np
+        elif isinstance(X, list):
+            X = pd.DataFrame(X)
 
-        if feature_names is None:
-            feature_names = self.feature_names
+        elif isinstance(X, np.ndarray):
+            X = np.squeeze(X)
 
-        X = self.to_dataframe(X)
-        X = X.copy()
+            if X.ndim == 1:
+                X = pd.DataFrame([X], columns=feature_names)
+            else:
+                if X.shape[1] == len(feature_names):
+                    X = pd.DataFrame(X, columns=feature_names)
+                else:
+                    X = pd.DataFrame(X)
+
+        else:
+            X = pd.DataFrame(X)
 
         X.columns = [str(c).strip() for c in X.columns]
 
         X = X.replace(["", " ", "NULL", "null", "None", "none"], np.nan)
 
         for col in X.columns:
-            X[col] = pd.to_numeric(X[col], errors="ignore")
+            X[col] = pd.to_numeric(X[col], errors="coerce")
+
+        # Rename matching input columns to exact model feature names
+        rename_map = {}
+
+        for model_col in feature_names:
+            actual_col = self.find_col(X.columns, model_col)
+            if actual_col is not None and actual_col != model_col:
+                rename_map[actual_col] = model_col
+
+        X = X.rename(columns=rename_map)
 
         # Step 1: Missing imputation
         for expected_col, impute_val in self.missing_imputation_map.items():
@@ -105,59 +112,46 @@ class LightGBMWrapper:
             if actual_col is not None:
                 X[actual_col] = X[actual_col].replace(replacement_map)
 
-        # Step 3: ABS derived features
+        # Step 3: Derived ABS features
         for derived_col, source_col in self.derived_feature_map.items():
             source_actual = self.find_col(X.columns, source_col)
             target_actual = self.find_col(feature_names, derived_col)
 
-            if target_actual is not None:
-                if source_actual is None:
-                    raise ValueError(
-                        f"Model requires '{target_actual}', but source column "
-                        f"'{source_col}' is missing from input."
-                    )
-
+            if target_actual is not None and source_actual is not None:
                 X[source_actual] = pd.to_numeric(X[source_actual], errors="coerce")
                 X[target_actual] = X[source_actual].abs()
 
-        # Step 4: Paid-off loan amount derived feature
+        # Step 4: Derived paid-off loan amount feature
         source_actual = self.find_col(X.columns, "cca_amt_of_loans_pd_off")
         target_actual = self.find_col(feature_names, "cca_amt_of_loans_pd_off_0")
 
-        if target_actual is not None:
-            if source_actual is None:
-                raise ValueError(
-                    f"Model requires '{target_actual}', but source column "
-                    "'cca_amt_of_loans_pd_off' is missing from input."
-                )
-
+        if target_actual is not None and source_actual is not None:
             X[source_actual] = pd.to_numeric(X[source_actual], errors="coerce")
 
             X[target_actual] = X[source_actual].apply(
-                lambda x: 4500 if x == 0 else x
+                lambda v: 4500 if v == 0 else v
             )
 
-        # Step 5: Add missing model columns
+        # Step 5: Add only truly missing model columns
         for model_col in feature_names:
             if model_col not in X.columns:
                 X[model_col] = 0
 
         return X[feature_names]
 
-    def predict(self, X):
+    def predict(self, X, feature_names):
         import pandas as pd
         import numpy as np
 
-        input_df = self.to_dataframe(X)
-        input_df.columns = [str(c).strip() for c in input_df.columns]
-
-        feature_names = self.feature_names
         X_processed = self.preprocess(X, feature_names)
 
         probability = np.asarray(self.booster.predict(X_processed))
         probability = np.clip(probability, 1e-15, 1 - 1e-15)
 
-        score = 480 + (30 / np.log(2)) * np.log((1 - probability) / probability)
+        score = 480 + (30 / np.log(2)) * np.log(
+            (1 - probability) / probability
+        )
+
         score2 = np.round(score)
 
         final_score = np.where(
@@ -167,16 +161,13 @@ class LightGBMWrapper:
         ).astype(int)
 
         pred_df = pd.DataFrame({
-            "version": [self.wrapper_version] * len(probability),
             "probability": probability,
-            "score": final_score,
-            "debug_input_cols": [",".join(input_df.columns.astype(str))] * len(probability),
-            "debug_processed_sum": X_processed.sum(axis=1).values,
+            "score": final_score
         })
 
         return pd.concat(
             [
-                input_df.reset_index(drop=True),
+                X_processed.reset_index(drop=True),
                 pred_df.reset_index(drop=True)
             ],
             axis=1
