@@ -4,40 +4,61 @@ class LightGBMWrapper:
 
         self.booster = lgb.Booster(model_file=model_path)
 
-        # Model-required columns
+        # Model-required feature names from LightGBM
         self.model_feature_names = self.booster.feature_name()
         self.feature_names = self.model_feature_names
 
-        self.missing_imputation_map = {
-            "cca_amt_of_loans_pd_off": 99999999999,
+        self.wrapper_version = "gen4_clarity_missing_invalid_only_v3"
+
+        # ------------------------------------------------------------
+        # Missing / invalid imputation - Clarity No-Hit
+        # Used only when value is missing or invalid
+        # ------------------------------------------------------------
+        self.clarity_no_hit_imputation_map = {
+            "cca_amt_of_loans_pd_off": 999999999998,
             "cca_cca_inq_180_days": -1,
-            "cca_cci_inq_3_yrs": -1,
+            "cca_cca_inq_3_yrs": -1,
+            "cca_ccl_inq_2_yrs": -1,
             "cca_num_bankaccts": -1,
-            "cca_rpt_nmi_prv_seen": 99999999999,
-            "fa_inq_365_days": -1,
-            "premier_v1_2_all4018": 999,
-            "premier_v1_2_all4520": 99,
-            "premier_v1_2_all7120": 999,
-            "premier_v1_2_all7320": 999,
-            "premier_v1_2_all7519": 999,
-            "premier_v1_2_all7938": 999,
-            "premier_v1_2_all8020": 999999,
-            "premier_v1_2_all8150": 9999,
-            "premier_v1_2_all8183": 9999,
-            "premier_v1_2_all8321": 9999,
-            "t11_tupl1705": 999999999,
+            "fa_inq_90_days": -1,
+            "fa_ptstot_365_days": -1,
+            "fa_ptstot_90_days": -1,
+            "p13_all7938": 0,
+            "p13_all8020": 0,
+            "p13_all8152": 0,
+            "p13_all8321": 0,
         }
 
+        # ------------------------------------------------------------
+        # Missing / invalid imputation - Clarity Hit
+        # Used only when value is missing or invalid
+        # ------------------------------------------------------------
+        self.clarity_hit_imputation_map = {
+            "cca_amt_of_loans_pd_off": 0,
+            "cca_cca_inq_180_days": 9999999999,
+            "cca_cca_inq_3_yrs": 9999999999,
+            "cca_ccl_inq_2_yrs": 9999999999,
+            "cca_num_bankaccts": 9999999999,
+            "fa_inq_90_days": 9999999999,
+            "fa_ptstot_365_days": 999,
+            "fa_ptstot_90_days": 999,
+            "p13_all7938": 0,
+            "p13_all8020": 0,
+            "p13_all8152": 0,
+            "p13_all8321": 0,
+        }
+
+        # Non-Clarity imputation, if needed
+        self.non_clarity_imputation_map = {
+            # Add attributes here only if they do not depend on clarity_hit_flag
+        }
+
+        # Default replacement, if needed
         self.default_replacement_map = {
-            "premier_v1_2_all4018": {999: -1},
-            "premier_v1_2_all4520": {99: -1},
-            "premier_v1_2_all7938": {994: -1, 997: -2, 999: -3},
-            "premier_v1_2_all8020": {999994: -1, 999996: -2, 999999: -3},
-            "premier_v1_2_all8150": {9996: 50, 9999: -2},
-            "premier_v1_2_all8183": {9999: -2},
-            "premier_v1_2_all8321": {9999: -3, 9996: -2, 9994: -1},
+            # Add default replacement rules here if still required
         }
 
+        # Existing ABS derived features, keep only if model expects them
         self.derived_feature_map = {
             "t11_tbca3303_abs": "t11_tbca3303",
             "t11_tbcc1303_abs": "t11_tbcc1303",
@@ -59,13 +80,22 @@ class LightGBMWrapper:
         import pandas as pd
         import numpy as np
 
-        # Convert input to DataFrame using INPUT column names, not model names
+        # ------------------------------------------------------------
+        # Convert input to DataFrame using INPUT feature names.
+        # Do NOT use model feature names here.
+        # ------------------------------------------------------------
         if isinstance(X, pd.DataFrame):
             X = X.copy()
 
         elif isinstance(X, dict):
             if "rows" in X:
                 X = pd.DataFrame(X["rows"])
+            elif (
+                "data" in X
+                and isinstance(X["data"], dict)
+                and "rows" in X["data"]
+            ):
+                X = pd.DataFrame(X["data"]["rows"])
             else:
                 X = pd.DataFrame([X])
 
@@ -91,12 +121,22 @@ class LightGBMWrapper:
 
         X.columns = [str(c).strip() for c in X.columns]
 
-        X = X.replace(["", " ", "NULL", "null", "None", "none"], np.nan)
+        # Normalize null-like values
+        X = X.replace(
+            ["", " ", "NULL", "null", "None", "none", "NA", "na", "N/A", "n/a"],
+            np.nan
+        )
 
+        # Convert values to numeric.
+        # Invalid values become NaN.
+        # This lets missing and invalid follow the same imputation rule.
         for col in X.columns:
             X[col] = pd.to_numeric(X[col], errors="coerce")
 
-        # Rename input columns to exact model column names when they match by name
+        # ------------------------------------------------------------
+        # Rename matching input columns to exact model feature names.
+        # Prevents real input columns from being treated as missing and added as 0.
+        # ------------------------------------------------------------
         rename_map = {}
 
         for model_col in model_feature_names:
@@ -106,19 +146,81 @@ class LightGBMWrapper:
 
         X = X.rename(columns=rename_map)
 
-        # Step 1: Missing imputation
-        for expected_col, impute_val in self.missing_imputation_map.items():
+        # ------------------------------------------------------------
+        # Step 1: Clarity hit/no-hit missing OR invalid imputation
+        #
+        # clarity_hit_flag:
+        #   1 = Clarity hit
+        #   0 = Clarity no-hit
+        #
+        # If clarity_hit_flag is missing/invalid/null, default to 0.
+        #
+        # IMPORTANT:
+        # Only replace values that are missing/invalid.
+        # Valid input values stay unchanged.
+        # ------------------------------------------------------------
+        clarity_hit_col = self.find_col(X.columns, "clarity_hit_flag")
+
+        if clarity_hit_col is None:
+            X["clarity_hit_flag"] = 0
+            clarity_hit_col = "clarity_hit_flag"
+        else:
+            X[clarity_hit_col] = pd.to_numeric(
+                X[clarity_hit_col],
+                errors="coerce"
+            ).fillna(0)
+
+        # Only exact 1 is treated as hit. Everything else is no-hit.
+        X[clarity_hit_col] = X[clarity_hit_col].apply(
+            lambda v: 1 if v == 1 else 0
+        )
+
+        all_clarity_cols = set(
+            list(self.clarity_no_hit_imputation_map.keys())
+            + list(self.clarity_hit_imputation_map.keys())
+        )
+
+        for expected_col in all_clarity_cols:
             actual_col = self.find_col(X.columns, expected_col)
+
+            if actual_col is not None:
+                no_hit_val = self.clarity_no_hit_imputation_map.get(expected_col)
+                hit_val = self.clarity_hit_imputation_map.get(expected_col)
+
+                # Only missing/invalid values are replaced.
+                # Valid values are not touched.
+                missing_or_invalid_mask = X[actual_col].isna()
+
+                no_hit_mask = missing_or_invalid_mask & (X[clarity_hit_col] == 0)
+                hit_mask = missing_or_invalid_mask & (X[clarity_hit_col] == 1)
+
+                if no_hit_val is not None:
+                    X.loc[no_hit_mask, actual_col] = no_hit_val
+
+                if hit_val is not None:
+                    X.loc[hit_mask, actual_col] = hit_val
+
+        # ------------------------------------------------------------
+        # Step 1B: Non-Clarity missing / invalid imputation
+        # ------------------------------------------------------------
+        for expected_col, impute_val in self.non_clarity_imputation_map.items():
+            actual_col = self.find_col(X.columns, expected_col)
+
             if actual_col is not None:
                 X[actual_col] = X[actual_col].fillna(impute_val)
 
-        # Step 2: Default replacement
+        # ------------------------------------------------------------
+        # Step 2: Default value replacement
+        # ------------------------------------------------------------
         for expected_col, replacement_map in self.default_replacement_map.items():
             actual_col = self.find_col(X.columns, expected_col)
+
             if actual_col is not None:
                 X[actual_col] = X[actual_col].replace(replacement_map)
 
+        # ------------------------------------------------------------
         # Step 3: ABS derived features
+        # ------------------------------------------------------------
         for derived_col, source_col in self.derived_feature_map.items():
             source_actual = self.find_col(X.columns, source_col)
             target_actual = self.find_col(model_feature_names, derived_col)
@@ -127,18 +229,33 @@ class LightGBMWrapper:
                 X[source_actual] = pd.to_numeric(X[source_actual], errors="coerce")
                 X[target_actual] = X[source_actual].abs()
 
-        # Step 4: paid-off loan amount derived feature
-        source_actual = self.find_col(X.columns, "cca_amt_of_loans_pd_off")
-        target_actual = self.find_col(model_feature_names, "cca_amt_of_loans_pd_off_0")
+        # ------------------------------------------------------------
+        # Step 4: Derived flag variables
+        #
+        # p13_all8020_flag = 1 if p13_all8020 > 999990 else 0
+        # p13_brc5620_flag = 1 if p13_brc5620 > 999999990 else 0
+        # ------------------------------------------------------------
+        source_actual = self.find_col(X.columns, "p13_all8020")
+        target_actual = self.find_col(model_feature_names, "p13_all8020_flag")
 
         if target_actual is not None and source_actual is not None:
             X[source_actual] = pd.to_numeric(X[source_actual], errors="coerce")
-
             X[target_actual] = X[source_actual].apply(
-                lambda v: 4500 if v == 0 else v
+                lambda v: 1 if v > 999990 else 0
             )
 
+        source_actual = self.find_col(X.columns, "p13_brc5620")
+        target_actual = self.find_col(model_feature_names, "p13_brc5620_flag")
+
+        if target_actual is not None and source_actual is not None:
+            X[source_actual] = pd.to_numeric(X[source_actual], errors="coerce")
+            X[target_actual] = X[source_actual].apply(
+                lambda v: 1 if v > 999999990 else 0
+            )
+
+        # ------------------------------------------------------------
         # Step 5: Add only missing model-required columns
+        # ------------------------------------------------------------
         for model_col in model_feature_names:
             if model_col not in X.columns:
                 X[model_col] = 0
@@ -149,7 +266,10 @@ class LightGBMWrapper:
         import pandas as pd
         import numpy as np
 
+        # feature_names passed by ClassPack = input schema columns
         input_feature_names = feature_names
+
+        # model_feature_names = LightGBM model scoring columns
         model_feature_names = self.model_feature_names
 
         X_processed = self.preprocess(
@@ -161,23 +281,37 @@ class LightGBMWrapper:
         probability = np.asarray(self.booster.predict(X_processed))
         probability = np.clip(probability, 1e-15, 1 - 1e-15)
 
-        score = 480 + (30 / np.log(2)) * np.log(
-            (1 - probability) / probability
+        # ------------------------------------------------------------
+        # New score conversion
+        #
+        # Score = 760 - 40 * log(50)/log(2)
+        #         + 40 * log((1 - prob) / prob) / log(2)
+        #
+        # Use natural log.
+        # Floor score to integer.
+        # Cap final score between 300 and 850.
+        # ------------------------------------------------------------
+        score = (
+            760
+            - 40 * (np.log(50) / np.log(2))
+            + 40 * (np.log((1 - probability) / probability) / np.log(2))
         )
 
-        score2 = np.round(score)
+        score2 = np.floor(score)
 
         final_score = np.where(
-            score2 > 850,
-            850,
-            np.where(score2 < 300, 300, score2)
+            score2 < 300,
+            300,
+            np.where(score2 > 850, 850, score2)
         ).astype(int)
 
         pred_df = pd.DataFrame({
+            "version": [self.wrapper_version] * len(probability),
             "probability": probability,
-            "score": final_score
+            "gen4_score": final_score
         })
 
+        # Returning processed model columns + output columns
         return pd.concat(
             [
                 X_processed.reset_index(drop=True),
