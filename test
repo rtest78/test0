@@ -3,7 +3,10 @@ class LightGBMWrapper:
         import lightgbm as lgb
 
         self.booster = lgb.Booster(model_file=model_path)
-        self.feature_names = self.booster.feature_name()
+
+        # Model-required columns
+        self.model_feature_names = self.booster.feature_name()
+        self.feature_names = self.model_feature_names
 
         self.missing_imputation_map = {
             "cca_amt_of_loans_pd_off": 99999999999,
@@ -52,11 +55,11 @@ class LightGBMWrapper:
 
         return None
 
-    def preprocess(self, X, feature_names):
+    def preprocess(self, X, input_feature_names, model_feature_names):
         import pandas as pd
         import numpy as np
 
-        # Convert input to dataframe without changing original schema
+        # Convert input to DataFrame using INPUT column names, not model names
         if isinstance(X, pd.DataFrame):
             X = X.copy()
 
@@ -69,14 +72,17 @@ class LightGBMWrapper:
         elif isinstance(X, list):
             X = pd.DataFrame(X)
 
+            if len(X.columns) == len(input_feature_names):
+                X.columns = input_feature_names
+
         elif isinstance(X, np.ndarray):
             X = np.squeeze(X)
 
             if X.ndim == 1:
-                X = pd.DataFrame([X], columns=feature_names)
+                X = pd.DataFrame([X], columns=input_feature_names)
             else:
-                if X.shape[1] == len(feature_names):
-                    X = pd.DataFrame(X, columns=feature_names)
+                if X.shape[1] == len(input_feature_names):
+                    X = pd.DataFrame(X, columns=input_feature_names)
                 else:
                     X = pd.DataFrame(X)
 
@@ -90,10 +96,10 @@ class LightGBMWrapper:
         for col in X.columns:
             X[col] = pd.to_numeric(X[col], errors="coerce")
 
-        # Rename matching input columns to exact model feature names
+        # Rename input columns to exact model column names when they match by name
         rename_map = {}
 
-        for model_col in feature_names:
+        for model_col in model_feature_names:
             actual_col = self.find_col(X.columns, model_col)
             if actual_col is not None and actual_col != model_col:
                 rename_map[actual_col] = model_col
@@ -106,24 +112,24 @@ class LightGBMWrapper:
             if actual_col is not None:
                 X[actual_col] = X[actual_col].fillna(impute_val)
 
-        # Step 2: Default value replacement
+        # Step 2: Default replacement
         for expected_col, replacement_map in self.default_replacement_map.items():
             actual_col = self.find_col(X.columns, expected_col)
             if actual_col is not None:
                 X[actual_col] = X[actual_col].replace(replacement_map)
 
-        # Step 3: Derived ABS features
+        # Step 3: ABS derived features
         for derived_col, source_col in self.derived_feature_map.items():
             source_actual = self.find_col(X.columns, source_col)
-            target_actual = self.find_col(feature_names, derived_col)
+            target_actual = self.find_col(model_feature_names, derived_col)
 
             if target_actual is not None and source_actual is not None:
                 X[source_actual] = pd.to_numeric(X[source_actual], errors="coerce")
                 X[target_actual] = X[source_actual].abs()
 
-        # Step 4: Derived paid-off loan amount feature
+        # Step 4: paid-off loan amount derived feature
         source_actual = self.find_col(X.columns, "cca_amt_of_loans_pd_off")
-        target_actual = self.find_col(feature_names, "cca_amt_of_loans_pd_off_0")
+        target_actual = self.find_col(model_feature_names, "cca_amt_of_loans_pd_off_0")
 
         if target_actual is not None and source_actual is not None:
             X[source_actual] = pd.to_numeric(X[source_actual], errors="coerce")
@@ -132,18 +138,25 @@ class LightGBMWrapper:
                 lambda v: 4500 if v == 0 else v
             )
 
-        # Step 5: Add only truly missing model columns
-        for model_col in feature_names:
+        # Step 5: Add only missing model-required columns
+        for model_col in model_feature_names:
             if model_col not in X.columns:
                 X[model_col] = 0
 
-        return X[feature_names]
+        return X[model_feature_names]
 
     def predict(self, X, feature_names):
         import pandas as pd
         import numpy as np
 
-        X_processed = self.preprocess(X, feature_names)
+        input_feature_names = feature_names
+        model_feature_names = self.model_feature_names
+
+        X_processed = self.preprocess(
+            X,
+            input_feature_names=input_feature_names,
+            model_feature_names=model_feature_names
+        )
 
         probability = np.asarray(self.booster.predict(X_processed))
         probability = np.clip(probability, 1e-15, 1 - 1e-15)
