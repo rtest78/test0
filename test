@@ -1,265 +1,418 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <title>XML XPath Finder</title>
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      margin: 30px;
-      background: #f7f7f7;
+package com.example.jsonviewer;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.servlet.http.HttpSession;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.stereotype.Controller;
+import org.springframework.ui.Model;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.Serializable;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+
+@SpringBootApplication
+@Controller
+public class JsonViewerApplication {
+
+    private final ObjectMapper mapper = new ObjectMapper();
+
+    public static void main(String[] args) {
+        SpringApplication.run(JsonViewerApplication.class, args);
     }
 
-    .container {
-      max-width: 900px;
-      margin: auto;
-      background: white;
-      padding: 25px;
-      border-radius: 10px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    @GetMapping("/")
+    public String home(Model model) {
+        model.addAttribute("recordCount", 0);
+        model.addAttribute("inputRows", new ArrayList<FieldRow>());
+        model.addAttribute("outputRows", new ArrayList<FieldRow>());
+        return "index";
     }
 
-    h2 {
-      text-align: center;
-      color: #333;
-    }
+    @PostMapping("/upload")
+    public String uploadFile(@RequestParam("file") MultipartFile file,
+                             HttpSession session,
+                             Model model) {
 
-    input, button {
-      padding: 10px;
-      margin: 8px 0;
-      font-size: 15px;
-    }
-
-    input[type="text"] {
-      width: 70%;
-    }
-
-    button {
-      cursor: pointer;
-      background: #0066cc;
-      color: white;
-      border: none;
-      border-radius: 5px;
-    }
-
-    button:hover {
-      background: #004c99;
-    }
-
-    .result {
-      background: #f1f5ff;
-      padding: 12px;
-      margin-top: 10px;
-      border-left: 4px solid #0066cc;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-
-    .result:hover {
-      background: #e5efff;
-    }
-
-    .xpath-box {
-      margin-top: 20px;
-      background: #222;
-      color: #00ff99;
-      padding: 15px;
-      border-radius: 6px;
-      word-break: break-all;
-      font-family: Consolas, monospace;
-    }
-
-    .error {
-      color: red;
-      margin-top: 10px;
-    }
-
-    .success {
-      color: green;
-      margin-top: 10px;
-    }
-
-    .tag {
-      font-weight: bold;
-      color: #003366;
-    }
-
-    .small {
-      font-size: 13px;
-      color: #666;
-    }
-  </style>
-</head>
-<body>
-
-<div class="container">
-  <h2>XML XPath Finder</h2>
-
-  <label><strong>Upload XML File:</strong></label><br />
-  <input type="file" id="xmlFile" accept=".xml" />
-
-  <p id="fileStatus" class="small"></p>
-
-  <hr />
-
-  <label><strong>Search Element Name:</strong></label><br />
-  <input type="text" id="searchInput" placeholder="Example: customer, account, name" />
-  <button onclick="searchElement()">Search</button>
-
-  <div id="message"></div>
-
-  <h3>Search Results</h3>
-  <div id="results"></div>
-
-  <h3>Selected XPath</h3>
-  <div id="xpathOutput" class="xpath-box">
-    XPath will appear here...
-  </div>
-
-  <br />
-  <button onclick="copyXPath()">Copy XPath</button>
-</div>
-
-<script>
-  let xmlDoc = null;
-  let selectedXPath = "";
-
-  document.getElementById("xmlFile").addEventListener("change", function(event) {
-    const file = event.target.files[0];
-
-    if (!file) {
-      return;
-    }
-
-    const reader = new FileReader();
-
-    reader.onload = function(e) {
-      const xmlText = e.target.result;
-      const parser = new DOMParser();
-
-      xmlDoc = parser.parseFromString(xmlText, "application/xml");
-
-      const parserError = xmlDoc.getElementsByTagName("parsererror");
-
-      if (parserError.length > 0) {
-        document.getElementById("fileStatus").innerHTML = "Invalid XML file.";
-        document.getElementById("fileStatus").className = "error";
-        xmlDoc = null;
-      } else {
-        document.getElementById("fileStatus").innerHTML = "XML file uploaded successfully: " + file.name;
-        document.getElementById("fileStatus").className = "success";
-      }
-    };
-
-    reader.readAsText(file);
-  });
-
-  function searchElement() {
-    const searchValue = document.getElementById("searchInput").value.trim();
-    const resultsDiv = document.getElementById("results");
-    const messageDiv = document.getElementById("message");
-
-    resultsDiv.innerHTML = "";
-    messageDiv.innerHTML = "";
-
-    if (!xmlDoc) {
-      messageDiv.innerHTML = "<p class='error'>Please upload a valid XML file first.</p>";
-      return;
-    }
-
-    if (!searchValue) {
-      messageDiv.innerHTML = "<p class='error'>Please enter an element name to search.</p>";
-      return;
-    }
-
-    const allElements = xmlDoc.getElementsByTagName("*");
-    let matches = [];
-
-    for (let i = 0; i < allElements.length; i++) {
-      if (allElements[i].nodeName.toLowerCase() === searchValue.toLowerCase()) {
-        matches.push(allElements[i]);
-      }
-    }
-
-    if (matches.length === 0) {
-      resultsDiv.innerHTML = "<p>No matching elements found.</p>";
-      return;
-    }
-
-    messageDiv.innerHTML = "<p class='success'>Found " + matches.length + " matching element(s).</p>";
-
-    matches.forEach((element, index) => {
-      const xpath = getXPath(element);
-      const value = element.textContent.trim();
-
-      const div = document.createElement("div");
-      div.className = "result";
-
-      div.innerHTML = `
-        <div><span class="tag">${index + 1}. &lt;${element.nodeName}&gt;</span></div>
-        <div class="small">Value: ${escapeHtml(value.substring(0, 150))}${value.length > 150 ? "..." : ""}</div>
-        <div class="small">XPath: ${xpath}</div>
-      `;
-
-      div.onclick = function() {
-        selectedXPath = xpath;
-        document.getElementById("xpathOutput").innerText = xpath;
-      };
-
-      resultsDiv.appendChild(div);
-    });
-  }
-
-  function getXPath(element) {
-    if (element.nodeType !== Node.ELEMENT_NODE) {
-      return "";
-    }
-
-    let path = "";
-
-    while (element && element.nodeType === Node.ELEMENT_NODE) {
-      let index = 1;
-      let sibling = element.previousElementSibling;
-
-      while (sibling) {
-        if (sibling.nodeName === element.nodeName) {
-          index++;
+        if (file == null || file.isEmpty()) {
+            model.addAttribute("errorMessage", "Please select a file.");
+            model.addAttribute("recordCount", 0);
+            model.addAttribute("inputRows", new ArrayList<FieldRow>());
+            model.addAttribute("outputRows", new ArrayList<FieldRow>());
+            return "index";
         }
-        sibling = sibling.previousElementSibling;
-      }
 
-      const tagName = element.nodeName;
-      const segment = "/" + tagName + "[" + index + "]";
+        try {
+            List<MemberRecord> records = parseFile(file);
+            session.setAttribute("records", records);
 
-      path = segment + path;
-      element = element.parentElement;
+            model.addAttribute("successMessage", "File uploaded successfully. Records loaded: " + records.size());
+            model.addAttribute("recordCount", records.size());
+            model.addAttribute("inputRows", new ArrayList<FieldRow>());
+            model.addAttribute("outputRows", new ArrayList<FieldRow>());
+
+        } catch (Exception ex) {
+            model.addAttribute("errorMessage", "Error reading file: " + ex.getMessage());
+            model.addAttribute("recordCount", 0);
+            model.addAttribute("inputRows", new ArrayList<FieldRow>());
+            model.addAttribute("outputRows", new ArrayList<FieldRow>());
+        }
+
+        return "index";
     }
 
-    return path;
-  }
+    @PostMapping("/search")
+    public String searchAccount(@RequestParam("accountNumber") String accountNumber,
+                                HttpSession session,
+                                Model model) {
 
-  function copyXPath() {
-    if (!selectedXPath) {
-      alert("Please select a result first.");
-      return;
+        List<MemberRecord> records = (List<MemberRecord>) session.getAttribute("records");
+
+        if (records == null || records.isEmpty()) {
+            model.addAttribute("errorMessage", "Please upload a file first.");
+            model.addAttribute("recordCount", 0);
+            model.addAttribute("inputRows", new ArrayList<FieldRow>());
+            model.addAttribute("outputRows", new ArrayList<FieldRow>());
+            return "index";
+        }
+
+        MemberRecord matchedRecord = searchByAccountNumber(records, accountNumber);
+
+        if (matchedRecord == null) {
+            model.addAttribute("errorMessage", "No record found for account number: " + accountNumber);
+            model.addAttribute("recordCount", records.size());
+            model.addAttribute("searchedAccountNumber", accountNumber);
+            model.addAttribute("inputRows", new ArrayList<FieldRow>());
+            model.addAttribute("outputRows", new ArrayList<FieldRow>());
+            return "index";
+        }
+
+        List<FieldRow> inputRows = flattenJson(matchedRecord.inputJson);
+        List<FieldRow> outputRows = flattenJson(matchedRecord.outputJson);
+
+        model.addAttribute("successMessage", "Record found for account number: " + accountNumber);
+        model.addAttribute("recordCount", records.size());
+        model.addAttribute("searchedAccountNumber", accountNumber);
+        model.addAttribute("memberNumber", matchedRecord.memberNumber);
+        model.addAttribute("inputRows", inputRows);
+        model.addAttribute("outputRows", outputRows);
+
+        return "index";
     }
 
-    navigator.clipboard.writeText(selectedXPath)
-      .then(() => {
-        alert("XPath copied!");
-      })
-      .catch(() => {
-        alert("Could not copy XPath.");
-      });
-  }
+    private List<MemberRecord> parseFile(MultipartFile file) {
+        List<MemberRecord> records = new ArrayList<>();
 
-  function escapeHtml(text) {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
-  }
-</script>
+        try (BufferedReader reader = new BufferedReader(
+                new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
 
-</body>
-</html>
+            String line;
+            int lineNumber = 0;
+
+            while ((line = reader.readLine()) != null) {
+                lineNumber++;
+
+                if (line.trim().isEmpty()) {
+                    continue;
+                }
+
+                try {
+                    MemberRecord record = parseLine(line);
+
+                    if (record != null) {
+                        records.add(record);
+                    }
+
+                } catch (Exception ex) {
+                    System.out.println("Skipping line " + lineNumber + ": " + ex.getMessage());
+                }
+            }
+
+        } catch (Exception ex) {
+            throw new RuntimeException("Error reading uploaded file: " + ex.getMessage(), ex);
+        }
+
+        return records;
+    }
+
+    private MemberRecord parseLine(String line) throws Exception {
+
+        /*
+         Example line:
+         2026-06-09, {"input":{"type":"java.lang.String","data":"{...}"},"output":{"type":"java.lang.String","data":"{...}"}}
+
+         We remove everything before the first {
+        */
+
+        int jsonStart = line.indexOf("{");
+
+        if (jsonStart < 0) {
+            return null;
+        }
+
+        String outerJsonText = line.substring(jsonStart).trim();
+
+        JsonNode outerJson = mapper.readTree(outerJsonText);
+
+        JsonNode inputDataNode = outerJson.path("input").path("data");
+        JsonNode outputDataNode = outerJson.path("output").path("data");
+
+        JsonNode inputJson = parseInnerJson(inputDataNode);
+        JsonNode outputJson = parseInnerJson(outputDataNode);
+
+        String accountNumber = findFirstValueByFieldName(inputJson, "accountNumber");
+        String memberNumber = findFirstValueByFieldName(inputJson, "memberNumber");
+
+        return new MemberRecord(accountNumber, memberNumber, inputJson, outputJson);
+    }
+
+    private JsonNode parseInnerJson(JsonNode dataNode) throws Exception {
+
+        if (dataNode == null || dataNode.isMissingNode() || dataNode.isNull()) {
+            return mapper.createObjectNode();
+        }
+
+        /*
+         In your file, input.data and output.data are JSON strings.
+         Example:
+         "data":"{\"collections\":{\"request\":{...}}}"
+        */
+
+        if (dataNode.isTextual()) {
+            String jsonText = dataNode.asText();
+
+            if (jsonText == null || jsonText.trim().isEmpty()) {
+                return mapper.createObjectNode();
+            }
+
+            return mapper.readTree(jsonText);
+        }
+
+        return dataNode;
+    }
+
+    private MemberRecord searchByAccountNumber(List<MemberRecord> records, String accountNumber) {
+
+        if (accountNumber == null || accountNumber.trim().isEmpty()) {
+            return null;
+        }
+
+        String searchValue = accountNumber.trim();
+
+        for (MemberRecord record : records) {
+            if (containsFieldValue(record.inputJson, "accountNumber", searchValue)) {
+                return record;
+            }
+        }
+
+        return null;
+    }
+
+    private boolean containsFieldValue(JsonNode node, String fieldName, String expectedValue) {
+
+        if (node == null) {
+            return false;
+        }
+
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+
+                String currentFieldName = field.getKey();
+                JsonNode currentValue = field.getValue();
+
+                if (currentFieldName.equalsIgnoreCase(fieldName)
+                        && currentValue != null
+                        && expectedValue.equalsIgnoreCase(currentValue.asText())) {
+                    return true;
+                }
+
+                if (containsFieldValue(currentValue, fieldName, expectedValue)) {
+                    return true;
+                }
+            }
+        }
+
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                if (containsFieldValue(child, fieldName, expectedValue)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private List<FieldRow> flattenJson(JsonNode jsonNode) {
+        List<FieldRow> rows = new ArrayList<>();
+        flatten(jsonNode, "", rows);
+        return rows;
+    }
+
+    private void flatten(JsonNode node, String path, List<FieldRow> rows) {
+
+        if (node == null || node.isNull()) {
+            rows.add(new FieldRow(path, "null"));
+            return;
+        }
+
+        if (node.isValueNode()) {
+            rows.add(new FieldRow(path, node.asText()));
+            return;
+        }
+
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+
+                String newPath = path.isEmpty()
+                        ? field.getKey()
+                        : path + "." + field.getKey();
+
+                flatten(field.getValue(), newPath, rows);
+            }
+        }
+
+        if (node.isArray()) {
+            int index = 0;
+
+            for (JsonNode child : node) {
+                String newPath = path + "[" + index + "]";
+                flatten(child, newPath, rows);
+                index++;
+            }
+        }
+    }
+
+    private String findFirstValueByFieldName(JsonNode node, String fieldName) {
+
+        if (node == null) {
+            return null;
+        }
+
+        if (node.isObject()) {
+            Iterator<Map.Entry<String, JsonNode>> fields = node.fields();
+
+            while (fields.hasNext()) {
+                Map.Entry<String, JsonNode> field = fields.next();
+
+                if (field.getKey().equalsIgnoreCase(fieldName)) {
+                    return field.getValue().asText();
+                }
+
+                String value = findFirstValueByFieldName(field.getValue(), fieldName);
+
+                if (value != null) {
+                    return value;
+                }
+            }
+        }
+
+        if (node.isArray()) {
+            for (JsonNode child : node) {
+                String value = findFirstValueByFieldName(child, fieldName);
+
+                if (value != null) {
+                    return value;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    public static class FieldRow implements Serializable {
+
+        private String fieldPath;
+        private String value;
+
+        public FieldRow() {
+        }
+
+        public FieldRow(String fieldPath, String value) {
+            this.fieldPath = fieldPath;
+            this.value = value;
+        }
+
+        public String getFieldPath() {
+            return fieldPath;
+        }
+
+        public void setFieldPath(String fieldPath) {
+            this.fieldPath = fieldPath;
+        }
+
+        public String getValue() {
+            return value;
+        }
+
+        public void setValue(String value) {
+            this.value = value;
+        }
+    }
+
+    public static class MemberRecord implements Serializable {
+
+        private String accountNumber;
+        private String memberNumber;
+        private JsonNode inputJson;
+        private JsonNode outputJson;
+
+        public MemberRecord() {
+        }
+
+        public MemberRecord(String accountNumber, String memberNumber, JsonNode inputJson, JsonNode outputJson) {
+            this.accountNumber = accountNumber;
+            this.memberNumber = memberNumber;
+            this.inputJson = inputJson;
+            this.outputJson = outputJson;
+        }
+
+        public String getAccountNumber() {
+            return accountNumber;
+        }
+
+        public void setAccountNumber(String accountNumber) {
+            this.accountNumber = accountNumber;
+        }
+
+        public String getMemberNumber() {
+            return memberNumber;
+        }
+
+        public void setMemberNumber(String memberNumber) {
+            this.memberNumber = memberNumber;
+        }
+
+        public JsonNode getInputJson() {
+            return inputJson;
+        }
+
+        public void setInputJson(JsonNode inputJson) {
+            this.inputJson = inputJson;
+        }
+
+        public JsonNode getOutputJson() {
+            return outputJson;
+        }
+
+        public void setOutputJson(JsonNode outputJson) {
+            this.outputJson = outputJson;
+        }
+    }
+}
