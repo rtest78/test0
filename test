@@ -1,22 +1,265 @@
-# ------------------------------------------------------------
-# Internal Clarity flag
-#
-# If clarity_hit_flag is not part of input, default to no-hit.
-# 1 = Clarity hit
-# 0 = Clarity no-hit
-# ------------------------------------------------------------
-clarity_hit_col = self.find_col(X.columns, "clarity_hit_flag")
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>XML XPath Finder</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 30px;
+      background: #f7f7f7;
+    }
 
-if clarity_hit_col is None:
-    X["_internal_clarity_hit_flag"] = 0
-    clarity_hit_col = "_internal_clarity_hit_flag"
-else:
-    X[clarity_hit_col] = pd.to_numeric(
-        X[clarity_hit_col],
-        errors="coerce"
-    ).fillna(0)
+    .container {
+      max-width: 900px;
+      margin: auto;
+      background: white;
+      padding: 25px;
+      border-radius: 10px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
 
-# Only exact 1 means hit. Everything else is no-hit.
-X[clarity_hit_col] = X[clarity_hit_col].apply(
-    lambda v: 1 if v == 1 else 0
-)
+    h2 {
+      text-align: center;
+      color: #333;
+    }
+
+    input, button {
+      padding: 10px;
+      margin: 8px 0;
+      font-size: 15px;
+    }
+
+    input[type="text"] {
+      width: 70%;
+    }
+
+    button {
+      cursor: pointer;
+      background: #0066cc;
+      color: white;
+      border: none;
+      border-radius: 5px;
+    }
+
+    button:hover {
+      background: #004c99;
+    }
+
+    .result {
+      background: #f1f5ff;
+      padding: 12px;
+      margin-top: 10px;
+      border-left: 4px solid #0066cc;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    .result:hover {
+      background: #e5efff;
+    }
+
+    .xpath-box {
+      margin-top: 20px;
+      background: #222;
+      color: #00ff99;
+      padding: 15px;
+      border-radius: 6px;
+      word-break: break-all;
+      font-family: Consolas, monospace;
+    }
+
+    .error {
+      color: red;
+      margin-top: 10px;
+    }
+
+    .success {
+      color: green;
+      margin-top: 10px;
+    }
+
+    .tag {
+      font-weight: bold;
+      color: #003366;
+    }
+
+    .small {
+      font-size: 13px;
+      color: #666;
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <h2>XML XPath Finder</h2>
+
+  <label><strong>Upload XML File:</strong></label><br />
+  <input type="file" id="xmlFile" accept=".xml" />
+
+  <p id="fileStatus" class="small"></p>
+
+  <hr />
+
+  <label><strong>Search Element Name:</strong></label><br />
+  <input type="text" id="searchInput" placeholder="Example: customer, account, name" />
+  <button onclick="searchElement()">Search</button>
+
+  <div id="message"></div>
+
+  <h3>Search Results</h3>
+  <div id="results"></div>
+
+  <h3>Selected XPath</h3>
+  <div id="xpathOutput" class="xpath-box">
+    XPath will appear here...
+  </div>
+
+  <br />
+  <button onclick="copyXPath()">Copy XPath</button>
+</div>
+
+<script>
+  let xmlDoc = null;
+  let selectedXPath = "";
+
+  document.getElementById("xmlFile").addEventListener("change", function(event) {
+    const file = event.target.files[0];
+
+    if (!file) {
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = function(e) {
+      const xmlText = e.target.result;
+      const parser = new DOMParser();
+
+      xmlDoc = parser.parseFromString(xmlText, "application/xml");
+
+      const parserError = xmlDoc.getElementsByTagName("parsererror");
+
+      if (parserError.length > 0) {
+        document.getElementById("fileStatus").innerHTML = "Invalid XML file.";
+        document.getElementById("fileStatus").className = "error";
+        xmlDoc = null;
+      } else {
+        document.getElementById("fileStatus").innerHTML = "XML file uploaded successfully: " + file.name;
+        document.getElementById("fileStatus").className = "success";
+      }
+    };
+
+    reader.readAsText(file);
+  });
+
+  function searchElement() {
+    const searchValue = document.getElementById("searchInput").value.trim();
+    const resultsDiv = document.getElementById("results");
+    const messageDiv = document.getElementById("message");
+
+    resultsDiv.innerHTML = "";
+    messageDiv.innerHTML = "";
+
+    if (!xmlDoc) {
+      messageDiv.innerHTML = "<p class='error'>Please upload a valid XML file first.</p>";
+      return;
+    }
+
+    if (!searchValue) {
+      messageDiv.innerHTML = "<p class='error'>Please enter an element name to search.</p>";
+      return;
+    }
+
+    const allElements = xmlDoc.getElementsByTagName("*");
+    let matches = [];
+
+    for (let i = 0; i < allElements.length; i++) {
+      if (allElements[i].nodeName.toLowerCase() === searchValue.toLowerCase()) {
+        matches.push(allElements[i]);
+      }
+    }
+
+    if (matches.length === 0) {
+      resultsDiv.innerHTML = "<p>No matching elements found.</p>";
+      return;
+    }
+
+    messageDiv.innerHTML = "<p class='success'>Found " + matches.length + " matching element(s).</p>";
+
+    matches.forEach((element, index) => {
+      const xpath = getXPath(element);
+      const value = element.textContent.trim();
+
+      const div = document.createElement("div");
+      div.className = "result";
+
+      div.innerHTML = `
+        <div><span class="tag">${index + 1}. &lt;${element.nodeName}&gt;</span></div>
+        <div class="small">Value: ${escapeHtml(value.substring(0, 150))}${value.length > 150 ? "..." : ""}</div>
+        <div class="small">XPath: ${xpath}</div>
+      `;
+
+      div.onclick = function() {
+        selectedXPath = xpath;
+        document.getElementById("xpathOutput").innerText = xpath;
+      };
+
+      resultsDiv.appendChild(div);
+    });
+  }
+
+  function getXPath(element) {
+    if (element.nodeType !== Node.ELEMENT_NODE) {
+      return "";
+    }
+
+    let path = "";
+
+    while (element && element.nodeType === Node.ELEMENT_NODE) {
+      let index = 1;
+      let sibling = element.previousElementSibling;
+
+      while (sibling) {
+        if (sibling.nodeName === element.nodeName) {
+          index++;
+        }
+        sibling = sibling.previousElementSibling;
+      }
+
+      const tagName = element.nodeName;
+      const segment = "/" + tagName + "[" + index + "]";
+
+      path = segment + path;
+      element = element.parentElement;
+    }
+
+    return path;
+  }
+
+  function copyXPath() {
+    if (!selectedXPath) {
+      alert("Please select a result first.");
+      return;
+    }
+
+    navigator.clipboard.writeText(selectedXPath)
+      .then(() => {
+        alert("XPath copied!");
+      })
+      .catch(() => {
+        alert("Could not copy XPath.");
+      });
+  }
+
+  function escapeHtml(text) {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;");
+  }
+</script>
+
+</body>
+</html>
