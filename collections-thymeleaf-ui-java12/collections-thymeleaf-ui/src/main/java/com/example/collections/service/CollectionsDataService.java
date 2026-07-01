@@ -1,9 +1,5 @@
-package com.example.collectionsui.service;
+package com.example.collections.service;
 
-import com.example.collectionsui.model.AccountData;
-import com.example.collectionsui.model.DailySnapshot;
-import com.example.collectionsui.model.DailySummary;
-import com.example.collectionsui.model.MemberData;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -22,9 +18,13 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.TreeMap;
+import java.util.TreeSet;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -36,8 +36,8 @@ public class CollectionsDataService {
             new ObjectMapper();
 
     /*
-     * Key   = business date, for example 2026-06-26
-     * Value = all members and accounts found for that date
+     * Key: business date, such as 2026-06-26
+     * Value: all members and accounts for that date
      */
     private final Map<String, DailySnapshot> snapshotsByDate =
             new ConcurrentHashMap<String, DailySnapshot>();
@@ -46,8 +46,6 @@ public class CollectionsDataService {
      * application.properties:
      *
      * collections.data.directory=C:/opensource/eclipse-workspace/test2/data
-     *
-     * When the property is missing, ./data is used.
      */
     @Value("${collections.data.directory:./data}")
     private String dataDirectory;
@@ -56,13 +54,11 @@ public class CollectionsDataService {
     public void initialize() {
 
         try {
-
             reload();
-
         } catch (Exception ex) {
 
             System.err.println(
-                    "Collections data load failed: "
+                    "Collections data initialization failed: "
                             + ex.getMessage()
             );
 
@@ -71,10 +67,10 @@ public class CollectionsDataService {
     }
 
     /**
-     * Reloads every file in the configured directory.
+     * Reloads all files from the configured folder.
      *
-     * Multiple files can contain records for the same business date.
-     * Records from those files are merged into one DailySnapshot.
+     * Multiple files may contain the same business date.
+     * Records for the same date are merged.
      */
     public synchronized void reload()
             throws IOException {
@@ -83,7 +79,7 @@ public class CollectionsDataService {
                 Path.of(dataDirectory);
 
         System.out.println(
-                "Loading Collections files from: "
+                "Loading files from: "
                         + folder.toAbsolutePath()
         );
 
@@ -113,49 +109,49 @@ public class CollectionsDataService {
         for (Path file : files) {
 
             System.out.println(
-                    "Processing file: "
+                    "Reading file: "
                             + file.toAbsolutePath()
             );
 
-            parseFile(file, loaded);
+            parseFile(
+                    file,
+                    loaded
+            );
         }
 
         snapshotsByDate.clear();
         snapshotsByDate.putAll(loaded);
 
         System.out.println(
-                "Business dates loaded: "
-                        + snapshotsByDate.keySet()
+                "Dates loaded: "
+                        + new TreeSet<String>(
+                                snapshotsByDate.keySet()
+                        )
         );
 
-        Map<String, DailySnapshot> sorted =
-                new TreeMap<String, DailySnapshot>(
-                        snapshotsByDate
-                );
-
         for (Map.Entry<String, DailySnapshot> entry
-                : sorted.entrySet()) {
+                : new TreeMap<String, DailySnapshot>(
+                        snapshotsByDate
+                ).entrySet()) {
 
             DailySnapshot snapshot =
                     entry.getValue();
 
             System.out.println(
-                    entry.getKey()
-                            + " members="
-                            + snapshot
-                                    .getMembersByNumber()
-                                    .size()
+                    "Date="
+                            + entry.getKey()
+                            + ", members="
+                            + snapshot.getMemberCount()
                             + ", accounts="
                             + snapshot.getAccountCount()
                             + ", source records="
-                            + snapshot
-                                    .getSourceRecordCount()
+                            + snapshot.getSourceRecordCount()
             );
         }
     }
 
     /**
-     * Finds all regular files under the configured data directory.
+     * Reads every regular file.
      *
      * Files do not need a .json extension.
      */
@@ -182,9 +178,9 @@ public class CollectionsDataService {
     }
 
     /**
-     * Reads one extract file line by line.
+     * Reads one file line by line.
      *
-     * Expected line:
+     * Expected physical line:
      *
      * 2026-06-26,{"input":{...},"output":{...}}
      */
@@ -193,21 +189,22 @@ public class CollectionsDataService {
             Map<String, DailySnapshot> loaded)
             throws IOException {
 
-        long totalLines = 0;
+        long lineNumber = 0;
         long successfulLines = 0;
         long failedLines = 0;
 
         try (BufferedReader reader =
                      Files.newBufferedReader(
                              file,
-                             StandardCharsets.UTF_8)) {
+                             StandardCharsets.UTF_8
+                     )) {
 
             String line;
 
             while ((line = reader.readLine())
                     != null) {
 
-                totalLines++;
+                lineNumber++;
 
                 if (line.trim().isEmpty()) {
                     continue;
@@ -217,7 +214,7 @@ public class CollectionsDataService {
 
                     parseLine(
                             file,
-                            totalLines,
+                            lineNumber,
                             line,
                             loaded
                     );
@@ -229,10 +226,10 @@ public class CollectionsDataService {
                     failedLines++;
 
                     System.err.println(
-                            "Unable to parse file="
+                            "Parse failed. File="
                                     + file.getFileName()
                                     + ", line="
-                                    + totalLines
+                                    + lineNumber
                                     + ", error="
                                     + ex.getMessage()
                     );
@@ -244,7 +241,7 @@ public class CollectionsDataService {
                 "Completed file="
                         + file.getFileName()
                         + ", total lines="
-                        + totalLines
+                        + lineNumber
                         + ", successful="
                         + successfulLines
                         + ", failed="
@@ -253,23 +250,20 @@ public class CollectionsDataService {
     }
 
     /**
-     * Parses one dated JSON line.
+     * Parses one dated JSON record.
      *
-     * Structure:
+     * Input path:
      *
-     * business date
-     *     ↓
-     * outer JSON
-     *     ↓
-     * input.data escaped JSON
-     *     ↓
-     * collections.request.customerData
+     * input.data
+     *   -> collections
+     *   -> request
+     *   -> customerData
      *
-     * outer JSON
-     *     ↓
-     * output.data escaped JSON
-     *     ↓
-     * collections.response
+     * Output path:
+     *
+     * output.data
+     *   -> collections
+     *   -> response
      */
     private void parseLine(
             Path sourceFile,
@@ -284,8 +278,7 @@ public class CollectionsDataService {
         if (firstComma < 0) {
 
             throw new IllegalArgumentException(
-                    "Business date separator comma "
-                            + "was not found"
+                    "Date separator comma was not found"
             );
         }
 
@@ -310,7 +303,7 @@ public class CollectionsDataService {
         if (outerJsonText.isEmpty()) {
 
             throw new IllegalArgumentException(
-                    "Outer JSON is empty"
+                    "JSON data is empty"
             );
         }
 
@@ -319,43 +312,16 @@ public class CollectionsDataService {
                         outerJsonText
                 );
 
-        /*
-         * Read and parse input.data.
-         */
-        JsonNode inputDataNode =
-                outerNode
-                        .path("input")
-                        .path("data");
-
         JsonNode inputPayload =
-                parseNestedJson(
-                        inputDataNode
+                extractPayload(
+                        outerNode,
+                        "input"
                 );
 
-        /*
-         * Your extract has:
-         *
-         * input.data
-         *   -> collections
-         *   -> request
-         */
         JsonNode requestNode =
-                inputPayload
-                        .path("collections")
-                        .path("request");
-
-        /*
-         * Fallback in case another dataset stores
-         * request directly under input.data.
-         */
-        if (requestNode.isMissingNode()
-                || requestNode.isNull()) {
-
-            requestNode =
-                    inputPayload.path(
-                            "request"
-                    );
-        }
+                findRequestNode(
+                        inputPayload
+                );
 
         JsonNode customerDataNode =
                 requestNode.path(
@@ -365,53 +331,22 @@ public class CollectionsDataService {
         if (!customerDataNode.isArray()) {
 
             throw new IllegalArgumentException(
-                    "customerData was not found at "
+                    "customerData was not found under "
                             + "collections.request.customerData"
             );
         }
 
-        /*
-         * Read and parse output.data.
-         */
-        JsonNode outputDataNode =
-                outerNode
-                        .path("output")
-                        .path("data");
-
         JsonNode outputPayload =
-                parseNestedJson(
-                        outputDataNode
+                extractPayload(
+                        outerNode,
+                        "output"
                 );
 
-        /*
-         * Your extract has:
-         *
-         * output.data
-         *   -> collections
-         *   -> response
-         */
         JsonNode responseNode =
-                outputPayload
-                        .path("collections")
-                        .path("response");
+                findResponseNode(
+                        outputPayload
+                );
 
-        /*
-         * Fallback for datasets where response is
-         * directly below output.data.
-         */
-        if (responseNode.isMissingNode()
-                || responseNode.isNull()) {
-
-            responseNode =
-                    outputPayload.path(
-                            "response"
-                    );
-        }
-
-        /*
-         * Merge all records from all files that
-         * belong to the same business date.
-         */
         DailySnapshot snapshot =
                 loaded.computeIfAbsent(
                         businessDate,
@@ -419,6 +354,11 @@ public class CollectionsDataService {
                                 new DailySnapshot(
                                         date
                                 )
+                );
+
+        Map<String, String> responseFields =
+                flattenJson(
+                        responseNode
                 );
 
         for (JsonNode accountNode
@@ -439,10 +379,9 @@ public class CollectionsDataService {
             if (memberNumber.isEmpty()) {
 
                 System.err.println(
-                        "Skipping record with no "
-                                + "memberNumber. File="
-                                + sourceFile
-                                        .getFileName()
+                        "Skipping record without memberNumber. "
+                                + "File="
+                                + sourceFile.getFileName()
                                 + ", line="
                                 + lineNumber
                 );
@@ -453,53 +392,77 @@ public class CollectionsDataService {
             if (accountNumber.isEmpty()) {
 
                 System.err.println(
-                        "Skipping record with no "
-                                + "accountNumber. File="
-                                + sourceFile
-                                        .getFileName()
+                        "Skipping record without accountNumber. "
+                                + "File="
+                                + sourceFile.getFileName()
                                 + ", line="
                                 + lineNumber
-                                + ", memberNumber="
+                                + ", member="
                                 + memberNumber
                 );
 
                 continue;
             }
 
-            MemberData memberData =
-                    snapshot
-                            .getMembersByNumber()
-                            .computeIfAbsent(
-                                    memberNumber,
-                                    key ->
-                                            new MemberData(
-                                                    memberNumber
-                                            )
-                            );
+            Map<String, String> requestFields =
+                    flattenJson(
+                            accountNode
+                    );
 
-            AccountData accountData =
-                    createAccountData(
-                            businessDate,
-                            sourceFile,
-                            accountNode,
-                            requestNode,
+            AccountRecord accountRecord =
+                    new AccountRecord();
+
+            accountRecord.setBusinessDate(
+                    businessDate
+            );
+
+            accountRecord.setSourceFile(
+                    sourceFile
+                            .getFileName()
+                            .toString()
+            );
+
+            accountRecord.setSourceLine(
+                    lineNumber
+            );
+
+            accountRecord.setMemberNumber(
+                    memberNumber
+            );
+
+            accountRecord.setAccountNumber(
+                    accountNumber
+            );
+
+            accountRecord.setRequestFields(
+                    requestFields
+            );
+
+            accountRecord.setResponseFields(
+                    responseFields
+            );
+
+            accountRecord.setAccountJson(
+                    prettyJson(
+                            accountNode
+                    )
+            );
+
+            accountRecord.setRequestJson(
+                    prettyJson(
+                            requestNode
+                    )
+            );
+
+            accountRecord.setResponseJson(
+                    prettyJson(
                             responseNode
-                    );
+                    )
+            );
 
-            /*
-             * Account number is the key inside
-             * the member.
-             *
-             * If the same member/account appears
-             * again on the same date, the later
-             * record replaces the earlier record.
-             */
-            memberData
-                    .getAccountsByNumber()
-                    .put(
-                            accountNumber,
-                            accountData
-                    );
+            snapshot.addAccount(
+                    accountRecord
+            );
         }
 
         snapshot.setSourceRecordCount(
@@ -509,12 +472,46 @@ public class CollectionsDataService {
     }
 
     /**
-     * Parses JSON stored inside input.data or output.data.
-     *
-     * Supports:
-     * - escaped JSON strings
-     * - normal JSON objects
-     * - JSON that was encoded more than once
+     * Extracts and parses input.data or output.data.
+     */
+    private JsonNode extractPayload(
+            JsonNode outerNode,
+            String section)
+            throws IOException {
+
+        JsonNode sectionNode =
+                outerNode.path(
+                        section
+                );
+
+        if (sectionNode.isMissingNode()
+                || sectionNode.isNull()) {
+
+            return objectMapper
+                    .createObjectNode();
+        }
+
+        JsonNode dataNode =
+                sectionNode.path(
+                        "data"
+                );
+
+        /*
+         * Some datasets may not have the data wrapper.
+         */
+        if (dataNode.isMissingNode()
+                || dataNode.isNull()) {
+
+            return sectionNode;
+        }
+
+        return parseNestedJson(
+                dataNode
+        );
+    }
+
+    /**
+     * Supports JSON objects and escaped JSON strings.
      */
     private JsonNode parseNestedJson(
             JsonNode dataNode)
@@ -535,7 +532,6 @@ public class CollectionsDataService {
         }
 
         if (!dataNode.isTextual()) {
-
             return dataNode;
         }
 
@@ -556,14 +552,17 @@ public class CollectionsDataService {
 
         int attempts = 0;
 
+        /*
+         * Supports data encoded more than once.
+         */
         while (parsedNode.isTextual()
                 && attempts < 3) {
 
-            String nestedText =
+            String nestedJsonText =
                     parsedNode.asText();
 
-            if (nestedText == null
-                    || nestedText
+            if (nestedJsonText == null
+                    || nestedJsonText
                             .trim()
                             .isEmpty()) {
 
@@ -572,7 +571,7 @@ public class CollectionsDataService {
 
             parsedNode =
                     objectMapper.readTree(
-                            nestedText
+                            nestedJsonText
                     );
 
             attempts++;
@@ -581,102 +580,113 @@ public class CollectionsDataService {
         return parsedNode;
     }
 
+    private JsonNode findRequestNode(
+            JsonNode inputPayload) {
+
+        JsonNode requestNode =
+                inputPayload
+                        .path("collections")
+                        .path("request");
+
+        if (!requestNode.isMissingNode()
+                && !requestNode.isNull()) {
+
+            return requestNode;
+        }
+
+        requestNode =
+                inputPayload.path(
+                        "request"
+                );
+
+        if (!requestNode.isMissingNode()
+                && !requestNode.isNull()) {
+
+            return requestNode;
+        }
+
+        return objectMapper
+                .createObjectNode();
+    }
+
+    private JsonNode findResponseNode(
+            JsonNode outputPayload) {
+
+        JsonNode responseNode =
+                outputPayload
+                        .path("collections")
+                        .path("response");
+
+        if (!responseNode.isMissingNode()
+                && !responseNode.isNull()) {
+
+            return responseNode;
+        }
+
+        responseNode =
+                outputPayload.path(
+                        "response"
+                );
+
+        if (!responseNode.isMissingNode()
+                && !responseNode.isNull()) {
+
+            return responseNode;
+        }
+
+        return objectMapper
+                .createObjectNode();
+    }
+
     /**
-     * Creates the account object shown in Thymeleaf.
+     * Converts JSON values into a map for display and comparison.
      *
-     * It preserves:
-     * - the individual account JSON
-     * - the complete request JSON
-     * - the complete response JSON
+     * Nested objects and arrays are stored as JSON text.
      */
-    private AccountData createAccountData(
-            String businessDate,
-            Path sourceFile,
-            JsonNode accountNode,
-            JsonNode requestNode,
-            JsonNode responseNode) {
+    private Map<String, String> flattenJson(
+            JsonNode node) {
 
-        AccountData accountData =
-                new AccountData();
+        Map<String, String> values =
+                new LinkedHashMap<String, String>();
 
-        accountData.setBusinessDate(
-                businessDate
+        if (node == null
+                || !node.isObject()) {
+
+            return values;
+        }
+
+        node.fields().forEachRemaining(
+                entry -> {
+
+                    JsonNode value =
+                            entry.getValue();
+
+                    if (value == null
+                            || value.isNull()) {
+
+                        values.put(
+                                entry.getKey(),
+                                ""
+                        );
+
+                    } else if (value.isValueNode()) {
+
+                        values.put(
+                                entry.getKey(),
+                                value.asText("")
+                        );
+
+                    } else {
+
+                        values.put(
+                                entry.getKey(),
+                                value.toString()
+                        );
+                    }
+                }
         );
 
-        accountData.setSourceFile(
-                sourceFile
-                        .getFileName()
-                        .toString()
-        );
-
-        accountData.setMemberNumber(
-                getText(
-                        accountNode,
-                        "memberNumber"
-                )
-        );
-
-        accountData.setAccountNumber(
-                getText(
-                        accountNode,
-                        "accountNumber"
-                )
-        );
-
-        accountData.setAccountStatus(
-                getText(
-                        accountNode,
-                        "accountStatus"
-                )
-        );
-
-        accountData.setAmountPastDue(
-                getText(
-                        accountNode,
-                        "amountPastDue"
-                )
-        );
-
-        accountData.setAccountBalance(
-                getText(
-                        accountNode,
-                        "accountBalance"
-                )
-        );
-
-        accountData.setCreditLimit(
-                getText(
-                        accountNode,
-                        "creditLimit"
-                )
-        );
-
-        accountData.setFicoScore(
-                getText(
-                        accountNode,
-                        "fico09Score"
-                )
-        );
-
-        accountData.setAccountJson(
-                prettyJson(
-                        accountNode
-                )
-        );
-
-        accountData.setRequestJson(
-                prettyJson(
-                        requestNode
-                )
-        );
-
-        accountData.setResponseJson(
-                prettyJson(
-                        responseNode
-                )
-        );
-
-        return accountData;
+        return values;
     }
 
     private String prettyJson(
@@ -712,7 +722,9 @@ public class CollectionsDataService {
         }
 
         JsonNode valueNode =
-                node.path(fieldName);
+                node.path(
+                        fieldName
+                );
 
         if (valueNode.isMissingNode()
                 || valueNode.isNull()) {
@@ -724,7 +736,7 @@ public class CollectionsDataService {
     }
 
     /**
-     * Returns all loaded business dates.
+     * Returns all available dates in ascending order.
      */
     public List<String> getAvailableDates() {
 
@@ -733,26 +745,408 @@ public class CollectionsDataService {
                         snapshotsByDate.keySet()
                 );
 
-        Collections.sort(dates);
+        Collections.sort(
+                dates
+        );
 
         return dates;
     }
 
     /**
-     * Returns dashboard totals for each business date.
+     * Returns the selected date or the latest loaded date.
      */
+    public String resolveDate(
+            String requestedDate) {
+
+        if (requestedDate != null
+                && !requestedDate
+                        .trim()
+                        .isEmpty()
+                && snapshotsByDate.containsKey(
+                        requestedDate.trim()
+                )) {
+
+            return requestedDate.trim();
+        }
+
+        List<String> dates =
+                getAvailableDates();
+
+        if (dates.isEmpty()) {
+            return null;
+        }
+
+        return dates.get(
+                dates.size() - 1
+        );
+    }
+
+    /**
+     * Returns accounts for a date and optional member filter.
+     */
+    public List<AccountRecord> findAccounts(
+            String businessDate,
+            String memberNumber) {
+
+        String resolvedDate =
+                resolveDate(
+                        businessDate
+                );
+
+        if (resolvedDate == null) {
+
+            return new ArrayList<AccountRecord>();
+        }
+
+        DailySnapshot snapshot =
+                snapshotsByDate.get(
+                        resolvedDate
+                );
+
+        if (snapshot == null) {
+
+            return new ArrayList<AccountRecord>();
+        }
+
+        String normalizedMemberNumber =
+                memberNumber == null
+                        ? ""
+                        : memberNumber.trim();
+
+        List<AccountRecord> accounts =
+                new ArrayList<AccountRecord>();
+
+        if (!normalizedMemberNumber.isEmpty()) {
+
+            Map<String, AccountRecord> memberAccounts =
+                    snapshot
+                            .getAccountsByMember()
+                            .get(
+                                    normalizedMemberNumber
+                            );
+
+            if (memberAccounts != null) {
+
+                accounts.addAll(
+                        memberAccounts.values()
+                );
+            }
+
+        } else {
+
+            for (Map<String, AccountRecord> memberAccounts
+                    : snapshot
+                            .getAccountsByMember()
+                            .values()) {
+
+                accounts.addAll(
+                        memberAccounts.values()
+                );
+            }
+        }
+
+        accounts.sort(
+                Comparator
+                        .comparing(
+                                AccountRecord::getMemberNumber,
+                                Comparator.nullsLast(
+                                        String::compareTo
+                                )
+                        )
+                        .thenComparing(
+                                AccountRecord::getAccountNumber,
+                                Comparator.nullsLast(
+                                        String::compareTo
+                                )
+                        )
+        );
+
+        return accounts;
+    }
+
+    /**
+     * Returns daily account views and compares the selected date
+     * against the previous available date.
+     */
+    public List<AccountDayView> findAccountDayViews(
+            String businessDate,
+            String memberNumber) {
+
+        String currentDate =
+                resolveDate(
+                        businessDate
+                );
+
+        if (currentDate == null) {
+
+            return new ArrayList<AccountDayView>();
+        }
+
+        String previousDate =
+                getPreviousDate(
+                        currentDate
+                );
+
+        DailySnapshot currentSnapshot =
+                snapshotsByDate.get(
+                        currentDate
+                );
+
+        DailySnapshot previousSnapshot =
+                previousDate == null
+                        ? null
+                        : snapshotsByDate.get(
+                                previousDate
+                        );
+
+        String normalizedMember =
+                memberNumber == null
+                        ? ""
+                        : memberNumber.trim();
+
+        Set<String> memberNumbers =
+                new TreeSet<String>();
+
+        if (!normalizedMember.isEmpty()) {
+
+            memberNumbers.add(
+                    normalizedMember
+            );
+
+        } else {
+
+            if (currentSnapshot != null) {
+
+                memberNumbers.addAll(
+                        currentSnapshot
+                                .getAccountsByMember()
+                                .keySet()
+                );
+            }
+
+            if (previousSnapshot != null) {
+
+                memberNumbers.addAll(
+                        previousSnapshot
+                                .getAccountsByMember()
+                                .keySet()
+                );
+            }
+        }
+
+        List<AccountDayView> views =
+                new ArrayList<AccountDayView>();
+
+        for (String currentMemberNumber
+                : memberNumbers) {
+
+            Map<String, AccountRecord> currentAccounts =
+                    getMemberAccounts(
+                            currentSnapshot,
+                            currentMemberNumber
+                    );
+
+            Map<String, AccountRecord> previousAccounts =
+                    getMemberAccounts(
+                            previousSnapshot,
+                            currentMemberNumber
+                    );
+
+            Set<String> accountNumbers =
+                    new TreeSet<String>();
+
+            accountNumbers.addAll(
+                    currentAccounts.keySet()
+            );
+
+            accountNumbers.addAll(
+                    previousAccounts.keySet()
+            );
+
+            for (String accountNumber
+                    : accountNumbers) {
+
+                AccountRecord currentAccount =
+                        currentAccounts.get(
+                                accountNumber
+                        );
+
+                AccountRecord previousAccount =
+                        previousAccounts.get(
+                                accountNumber
+                        );
+
+                AccountDayView view =
+                        new AccountDayView();
+
+                view.setCurrentDate(
+                        currentDate
+                );
+
+                view.setPreviousDate(
+                        previousDate
+                );
+
+                view.setPreviousAccount(
+                        previousAccount
+                );
+
+                if (currentAccount != null
+                        && previousAccount == null) {
+
+                    view.setAccount(
+                            currentAccount
+                    );
+
+                    view.setChangeType(
+                            ChangeType.NEW
+                    );
+
+                } else if (currentAccount == null
+                        && previousAccount != null) {
+
+                    view.setAccount(
+                            previousAccount
+                    );
+
+                    view.setChangeType(
+                            ChangeType.MISSING
+                    );
+
+                } else if (accountsDifferent(
+                        previousAccount,
+                        currentAccount
+                )) {
+
+                    view.setAccount(
+                            currentAccount
+                    );
+
+                    view.setChangeType(
+                            ChangeType.CHANGED
+                    );
+
+                } else {
+
+                    view.setAccount(
+                            currentAccount
+                    );
+
+                    view.setChangeType(
+                            ChangeType.UNCHANGED
+                    );
+                }
+
+                views.add(
+                        view
+                );
+            }
+        }
+
+        views.sort(
+                Comparator
+                        .comparing(
+                                view ->
+                                        view.getAccount()
+                                                .getMemberNumber(),
+                                Comparator.nullsLast(
+                                        String::compareTo
+                                )
+                        )
+                        .thenComparing(
+                                view ->
+                                        view.getAccount()
+                                                .getAccountNumber(),
+                                Comparator.nullsLast(
+                                        String::compareTo
+                                )
+                        )
+        );
+
+        return views;
+    }
+
+    private Map<String, AccountRecord> getMemberAccounts(
+            DailySnapshot snapshot,
+            String memberNumber) {
+
+        if (snapshot == null) {
+
+            return Collections
+                    .emptyMap();
+        }
+
+        Map<String, AccountRecord> accounts =
+                snapshot
+                        .getAccountsByMember()
+                        .get(
+                                memberNumber
+                        );
+
+        if (accounts == null) {
+
+            return Collections
+                    .emptyMap();
+        }
+
+        return accounts;
+    }
+
+    private boolean accountsDifferent(
+            AccountRecord first,
+            AccountRecord second) {
+
+        if (first == null
+                && second == null) {
+
+            return false;
+        }
+
+        if (first == null
+                || second == null) {
+
+            return true;
+        }
+
+        return !Objects.equals(
+                first.getRequestFields(),
+                second.getRequestFields()
+        )
+                || !Objects.equals(
+                        first.getResponseFields(),
+                        second.getResponseFields()
+                );
+    }
+
+    private String getPreviousDate(
+            String currentDate) {
+
+        List<String> dates =
+                getAvailableDates();
+
+        int index =
+                dates.indexOf(
+                        currentDate
+                );
+
+        if (index <= 0) {
+            return null;
+        }
+
+        return dates.get(
+                index - 1
+        );
+    }
+
     public List<DailySummary> getDailySummaries() {
 
         List<DailySummary> summaries =
                 new ArrayList<DailySummary>();
 
-        Map<String, DailySnapshot> sorted =
-                new TreeMap<String, DailySnapshot>(
-                        snapshotsByDate
-                );
-
         for (Map.Entry<String, DailySnapshot> entry
-                : sorted.entrySet()) {
+                : new TreeMap<String, DailySnapshot>(
+                        snapshotsByDate
+                ).entrySet()) {
 
             DailySnapshot snapshot =
                     entry.getValue();
@@ -765,9 +1159,7 @@ public class CollectionsDataService {
             );
 
             summary.setMemberCount(
-                    snapshot
-                            .getMembersByNumber()
-                            .size()
+                    snapshot.getMemberCount()
             );
 
             summary.setAccountCount(
@@ -775,100 +1167,17 @@ public class CollectionsDataService {
             );
 
             summary.setSourceRecordCount(
-                    snapshot
-                            .getSourceRecordCount()
+                    snapshot.getSourceRecordCount()
             );
 
-            summaries.add(summary);
+            summaries.add(
+                    summary
+            );
         }
 
         return summaries;
     }
 
-    /**
-     * Returns accounts for the selected date.
-     *
-     * When memberNumber is supplied, only that member is returned.
-     */
-    public List<AccountData> findAccounts(
-            String businessDate,
-            String memberNumber) {
-
-        DailySnapshot snapshot =
-                getSnapshot(
-                        businessDate
-                );
-
-        if (snapshot == null) {
-
-            return new ArrayList<AccountData>();
-        }
-
-        List<AccountData> accounts =
-                new ArrayList<AccountData>();
-
-        String normalizedMemberNumber =
-                memberNumber == null
-                        ? ""
-                        : memberNumber.trim();
-
-        if (!normalizedMemberNumber.isEmpty()) {
-
-            MemberData member =
-                    snapshot
-                            .getMembersByNumber()
-                            .get(
-                                    normalizedMemberNumber
-                            );
-
-            if (member != null) {
-
-                accounts.addAll(
-                        member
-                                .getAccountsByNumber()
-                                .values()
-                );
-            }
-
-        } else {
-
-            for (MemberData member
-                    : snapshot
-                            .getMembersByNumber()
-                            .values()) {
-
-                accounts.addAll(
-                        member
-                                .getAccountsByNumber()
-                                .values()
-                );
-            }
-        }
-
-        accounts.sort(
-                Comparator
-                        .comparing(
-                                AccountData::getMemberNumber,
-                                Comparator.nullsLast(
-                                        String::compareTo
-                                )
-                        )
-                        .thenComparing(
-                                AccountData::getAccountNumber,
-                                Comparator.nullsLast(
-                                        String::compareTo
-                                )
-                        )
-        );
-
-        return accounts;
-    }
-
-    /**
-     * Returns one snapshot.
-     *
-     * When no date is supplied, the latest available date is used.
-     */
     public DailySnapshot getSnapshot(
             String businessDate) {
 
@@ -886,41 +1195,450 @@ public class CollectionsDataService {
         );
     }
 
-    /**
-     * Returns the requested date or the latest date.
-     */
-    public String resolveDate(
-            String requestedDate) {
-
-        if (requestedDate != null
-                && !requestedDate
-                        .trim()
-                        .isEmpty()
-                && snapshotsByDate
-                        .containsKey(
-                                requestedDate.trim()
-                        )) {
-
-            return requestedDate.trim();
-        }
-
-        List<String> dates =
-                getAvailableDates();
-
-        if (dates.isEmpty()) {
-            return null;
-        }
-
-        return dates.get(
-                dates.size() - 1
-        );
-    }
-
     public String getDataDirectory() {
         return dataDirectory;
     }
 
     public int getLoadedDateCount() {
         return snapshotsByDate.size();
+    }
+
+    /*
+     * =========================================================
+     * INNER MODEL CLASSES
+     * =========================================================
+     */
+
+    public static class AccountRecord {
+
+        private String memberNumber;
+        private String accountNumber;
+
+        private Map<String, String> requestFields =
+                new LinkedHashMap<String, String>();
+
+        private Map<String, String> responseFields =
+                new LinkedHashMap<String, String>();
+
+        private String requestJson;
+        private String responseJson;
+        private String accountJson;
+
+        private String sourceFile;
+        private String businessDate;
+        private long sourceLine;
+
+        public AccountRecord() {
+        }
+
+        public String getMemberNumber() {
+            return memberNumber;
+        }
+
+        public void setMemberNumber(
+                String memberNumber) {
+
+            this.memberNumber =
+                    memberNumber;
+        }
+
+        public String getAccountNumber() {
+            return accountNumber;
+        }
+
+        public void setAccountNumber(
+                String accountNumber) {
+
+            this.accountNumber =
+                    accountNumber;
+        }
+
+        public Map<String, String> getRequestFields() {
+            return requestFields;
+        }
+
+        public void setRequestFields(
+                Map<String, String> requestFields) {
+
+            if (requestFields == null) {
+
+                this.requestFields =
+                        new LinkedHashMap<String, String>();
+
+            } else {
+
+                this.requestFields =
+                        new LinkedHashMap<String, String>(
+                                requestFields
+                        );
+            }
+        }
+
+        public Map<String, String> getResponseFields() {
+            return responseFields;
+        }
+
+        public void setResponseFields(
+                Map<String, String> responseFields) {
+
+            if (responseFields == null) {
+
+                this.responseFields =
+                        new LinkedHashMap<String, String>();
+
+            } else {
+
+                this.responseFields =
+                        new LinkedHashMap<String, String>(
+                                responseFields
+                        );
+            }
+        }
+
+        public String getRequestJson() {
+            return requestJson;
+        }
+
+        public void setRequestJson(
+                String requestJson) {
+
+            this.requestJson =
+                    requestJson;
+        }
+
+        public String getResponseJson() {
+            return responseJson;
+        }
+
+        public void setResponseJson(
+                String responseJson) {
+
+            this.responseJson =
+                    responseJson;
+        }
+
+        public String getAccountJson() {
+            return accountJson;
+        }
+
+        public void setAccountJson(
+                String accountJson) {
+
+            this.accountJson =
+                    accountJson;
+        }
+
+        public String getSourceFile() {
+            return sourceFile;
+        }
+
+        public void setSourceFile(
+                String sourceFile) {
+
+            this.sourceFile =
+                    sourceFile;
+        }
+
+        public String getBusinessDate() {
+            return businessDate;
+        }
+
+        public void setBusinessDate(
+                String businessDate) {
+
+            this.businessDate =
+                    businessDate;
+        }
+
+        public long getSourceLine() {
+            return sourceLine;
+        }
+
+        public void setSourceLine(
+                long sourceLine) {
+
+            this.sourceLine =
+                    sourceLine;
+        }
+
+        public String requestValue(
+                String fieldName) {
+
+            if (requestFields == null) {
+                return "";
+            }
+
+            return requestFields.getOrDefault(
+                    fieldName,
+                    ""
+            );
+        }
+
+        public String responseValue(
+                String fieldName) {
+
+            if (responseFields == null) {
+                return "";
+            }
+
+            return responseFields.getOrDefault(
+                    fieldName,
+                    ""
+            );
+        }
+
+        public String getAccountStatus() {
+            return requestValue(
+                    "accountStatus"
+            );
+        }
+
+        public String getAmountPastDue() {
+            return requestValue(
+                    "amountPastDue"
+            );
+        }
+
+        public String getAccountBalance() {
+            return requestValue(
+                    "accountBalance"
+            );
+        }
+
+        public String getCreditLimit() {
+            return requestValue(
+                    "creditLimit"
+            );
+        }
+
+        public String getFicoScore() {
+            return requestValue(
+                    "fico09Score"
+            );
+        }
+    }
+
+    public static class AccountDayView {
+
+        private AccountRecord account;
+        private AccountRecord previousAccount;
+        private ChangeType changeType;
+        private String currentDate;
+        private String previousDate;
+
+        public AccountDayView() {
+        }
+
+        public AccountRecord getAccount() {
+            return account;
+        }
+
+        public void setAccount(
+                AccountRecord account) {
+
+            this.account =
+                    account;
+        }
+
+        public AccountRecord getPreviousAccount() {
+            return previousAccount;
+        }
+
+        public void setPreviousAccount(
+                AccountRecord previousAccount) {
+
+            this.previousAccount =
+                    previousAccount;
+        }
+
+        public ChangeType getChangeType() {
+            return changeType;
+        }
+
+        public void setChangeType(
+                ChangeType changeType) {
+
+            this.changeType =
+                    changeType;
+        }
+
+        public String getCurrentDate() {
+            return currentDate;
+        }
+
+        public void setCurrentDate(
+                String currentDate) {
+
+            this.currentDate =
+                    currentDate;
+        }
+
+        public String getPreviousDate() {
+            return previousDate;
+        }
+
+        public void setPreviousDate(
+                String previousDate) {
+
+            this.previousDate =
+                    previousDate;
+        }
+    }
+
+    public enum ChangeType {
+        NEW,
+        MISSING,
+        CHANGED,
+        UNCHANGED
+    }
+
+    public static class DailySnapshot {
+
+        private String businessDate;
+
+        /*
+         * First key: member number
+         * Second key: account number
+         */
+        private Map<String, Map<String, AccountRecord>>
+                accountsByMember =
+                new TreeMap<String, Map<String, AccountRecord>>();
+
+        private long sourceRecordCount;
+
+        public DailySnapshot() {
+        }
+
+        public DailySnapshot(
+                String businessDate) {
+
+            this.businessDate =
+                    businessDate;
+        }
+
+        public void addAccount(
+                AccountRecord accountRecord) {
+
+            accountsByMember
+                    .computeIfAbsent(
+                            accountRecord
+                                    .getMemberNumber(),
+                            member ->
+                                    new TreeMap<String, AccountRecord>()
+                    )
+                    .put(
+                            accountRecord
+                                    .getAccountNumber(),
+                            accountRecord
+                    );
+        }
+
+        public String getBusinessDate() {
+            return businessDate;
+        }
+
+        public void setBusinessDate(
+                String businessDate) {
+
+            this.businessDate =
+                    businessDate;
+        }
+
+        public Map<String, Map<String, AccountRecord>>
+        getAccountsByMember() {
+
+            return accountsByMember;
+        }
+
+        public void setAccountsByMember(
+                Map<String, Map<String, AccountRecord>>
+                        accountsByMember) {
+
+            this.accountsByMember =
+                    accountsByMember;
+        }
+
+        public long getSourceRecordCount() {
+            return sourceRecordCount;
+        }
+
+        public void setSourceRecordCount(
+                long sourceRecordCount) {
+
+            this.sourceRecordCount =
+                    sourceRecordCount;
+        }
+
+        public long getMemberCount() {
+            return accountsByMember.size();
+        }
+
+        public long getAccountCount() {
+
+            long count = 0;
+
+            for (Map<String, AccountRecord> accounts
+                    : accountsByMember.values()) {
+
+                count += accounts.size();
+            }
+
+            return count;
+        }
+    }
+
+    public static class DailySummary {
+
+        private String businessDate;
+        private long memberCount;
+        private long accountCount;
+        private long sourceRecordCount;
+
+        public DailySummary() {
+        }
+
+        public String getBusinessDate() {
+            return businessDate;
+        }
+
+        public void setBusinessDate(
+                String businessDate) {
+
+            this.businessDate =
+                    businessDate;
+        }
+
+        public long getMemberCount() {
+            return memberCount;
+        }
+
+        public void setMemberCount(
+                long memberCount) {
+
+            this.memberCount =
+                    memberCount;
+        }
+
+        public long getAccountCount() {
+            return accountCount;
+        }
+
+        public void setAccountCount(
+                long accountCount) {
+
+            this.accountCount =
+                    accountCount;
+        }
+
+        public long getSourceRecordCount() {
+            return sourceRecordCount;
+        }
+
+        public void setSourceRecordCount(
+                long sourceRecordCount) {
+
+            this.sourceRecordCount =
+                    sourceRecordCount;
+        }
     }
 }
