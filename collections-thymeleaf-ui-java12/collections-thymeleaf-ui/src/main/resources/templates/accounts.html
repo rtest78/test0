@@ -12,14 +12,15 @@
 
     <style>
         body {
+            margin: 0;
+            padding: 24px;
             font-family: Arial, sans-serif;
-            margin: 24px;
             background: #f5f7fa;
             color: #202124;
         }
 
         .container {
-            max-width: 1600px;
+            max-width: 1900px;
             margin: auto;
         }
 
@@ -29,6 +30,10 @@
             align-items: center;
             gap: 16px;
             margin-bottom: 20px;
+        }
+
+        h1 {
+            margin: 0 0 8px 0;
         }
 
         .card {
@@ -41,7 +46,7 @@
 
         .filters {
             display: flex;
-            gap: 12px;
+            gap: 14px;
             align-items: end;
             flex-wrap: wrap;
         }
@@ -75,6 +80,15 @@
             background: #5f6368;
         }
 
+        .summary-line {
+            margin-top: 8px;
+        }
+
+        .table-wrapper {
+            overflow: auto;
+            max-height: 730px;
+        }
+
         table {
             width: 100%;
             border-collapse: collapse;
@@ -87,17 +101,14 @@
             padding: 9px;
             text-align: left;
             vertical-align: top;
+            white-space: nowrap;
         }
 
         th {
             background: #eef2f7;
             position: sticky;
             top: 0;
-        }
-
-        .table-wrapper {
-            overflow-x: auto;
-            max-height: 720px;
+            z-index: 1;
         }
 
         .status {
@@ -120,13 +131,24 @@
             color: #5f6368;
         }
 
+        .positive {
+            color: #137333;
+            font-weight: bold;
+        }
+
+        .negative {
+            color: #b3261e;
+            font-weight: bold;
+        }
+
         details {
-            margin-bottom: 7px;
+            margin-bottom: 8px;
         }
 
         summary {
             cursor: pointer;
             color: #1a73e8;
+            font-weight: bold;
         }
 
         pre {
@@ -138,6 +160,17 @@
             background: #f6f8fa;
             border: 1px solid #dfe3e8;
             padding: 10px;
+        }
+
+        .source {
+            white-space: normal;
+            min-width: 210px;
+            overflow-wrap: anywhere;
+        }
+
+        .json-column {
+            min-width: 160px;
+            white-space: normal;
         }
 
         .empty {
@@ -157,7 +190,13 @@
         <div>
             <h1>Daily Accounts</h1>
 
-            <p th:if="${snapshot != null}">
+            <div class="summary-line"
+                 th:if="${snapshot != null}">
+
+                Date:
+                <strong th:text="${selectedDate}"></strong>
+
+                &nbsp;|&nbsp;
 
                 Members:
                 <strong th:text="${snapshot.memberCount}"></strong>
@@ -169,9 +208,9 @@
 
                 &nbsp;|&nbsp;
 
-                Files:
+                Source files:
                 <strong th:text="${snapshot.sourceFiles}"></strong>
-            </p>
+            </div>
         </div>
 
         <a class="button secondary"
@@ -211,8 +250,43 @@
                 <input id="memberNumber"
                        name="memberNumber"
                        type="text"
-                       placeholder="Enter member number"
+                       placeholder="Enter exact member number"
                        th:value="${memberNumber}">
+            </div>
+
+            <div>
+                <label for="status">
+                    Change Type
+                </label>
+
+                <select id="status"
+                        name="status">
+
+                    <option value=""
+                            th:selected="${status == null or status == ''}">
+                        All
+                    </option>
+
+                    <option value="NEW"
+                            th:selected="${status == 'NEW'}">
+                        New
+                    </option>
+
+                    <option value="MISSING"
+                            th:selected="${status == 'MISSING'}">
+                        Missing
+                    </option>
+
+                    <option value="CHANGED"
+                            th:selected="${status == 'CHANGED'}">
+                        Changed
+                    </option>
+
+                    <option value="UNCHANGED"
+                            th:selected="${status == 'UNCHANGED'}">
+                        Unchanged
+                    </option>
+                </select>
             </div>
 
             <div>
@@ -223,9 +297,11 @@
                 </button>
 
                 <a class="button secondary"
-                   th:href="@{/accounts(date=${selectedDate})}">
+                   th:href="@{/accounts(
+                       date=${selectedDate}
+                   )}">
 
-                    Clear Member
+                    Clear Filters
                 </a>
             </div>
         </form>
@@ -243,14 +319,17 @@
                     <th>Change</th>
                     <th>Member Number</th>
                     <th>Account Number</th>
+                    <th>Previous Balance</th>
+                    <th>Current Balance</th>
+                    <th>Balance Change</th>
+                    <th>Channel</th>
                     <th>Account Status</th>
                     <th>Past Due</th>
-                    <th>Balance</th>
                     <th>Credit Limit</th>
                     <th>FICO</th>
                     <th>Action Type</th>
-                    <th>Source File</th>
-                    <th>JSON</th>
+                    <th>Source</th>
+                    <th>JSON Details</th>
                 </tr>
                 </thead>
 
@@ -265,32 +344,87 @@
                         </span>
                     </td>
 
-                    <td th:text="${view.account.memberNumber}"></td>
+                    <td th:text="${view.account.memberNumber}">
+                    </td>
 
-                    <td th:text="${view.account.accountNumber}"></td>
-
-                    <td th:text="${view.account.accountStatus}"></td>
-
-                    <td th:text="${view.account.amountPastDue}"></td>
-
-                    <td th:text="${view.account.accountBalance}"></td>
-
-                    <td th:text="${view.account.creditLimit}"></td>
-
-                    <td th:text="${view.account.ficoScore}"></td>
-
-                    <td th:text="${view.account.actionType}"></td>
+                    <td th:text="${view.account.accountNumber}">
+                    </td>
 
                     <td>
-                        <span th:text="${view.account.sourceFile}"></span>
+                        <span th:if="${view.previousBalance != null
+                            and view.previousBalance != ''}"
+                              th:text="${view.previousBalance}">
+                        </span>
+
+                        <span th:if="${view.previousBalance == null
+                            or view.previousBalance == ''}">
+                            -
+                        </span>
+                    </td>
+
+                    <td>
+                        <span th:if="${view.currentBalance != null
+                            and view.currentBalance != ''}"
+                              th:text="${view.currentBalance}">
+                        </span>
+
+                        <span th:if="${view.currentBalance == null
+                            or view.currentBalance == ''}">
+                            -
+                        </span>
+                    </td>
+
+                    <td>
+                        <span th:if="${view.balanceChanged}"
+                              th:text="${view.balanceChange}"
+                              th:classappend="${view.balanceChange.startsWith('-')}
+                                  ? 'negative'
+                                  : 'positive'">
+                        </span>
+
+                        <span th:if="${!view.balanceChanged}">
+                            -
+                        </span>
+                    </td>
+
+                    <td th:text="${view.channel}">
+                    </td>
+
+                    <td th:text="${view.account.accountStatus}">
+                    </td>
+
+                    <td th:text="${view.account.amountPastDue}">
+                    </td>
+
+                    <td th:text="${view.account.creditLimit}">
+                    </td>
+
+                    <td th:text="${view.account.ficoScore}">
+                    </td>
+
+                    <td th:text="${view.account.actionType}">
+                    </td>
+
+                    <td class="source">
+
+                        <span th:text="${view.account.sourceFile}">
+                        </span>
 
                         <br>
 
                         Line:
-                        <span th:text="${view.account.sourceLine}"></span>
+                        <span th:text="${view.account.sourceLine}">
+                        </span>
+
+                        <br>
+
+                        Record date:
+                        <span th:text="${view.account.businessDate}">
+                        </span>
                     </td>
 
-                    <td>
+                    <td class="json-column">
+
                         <details>
                             <summary>Account JSON</summary>
 
@@ -304,7 +438,7 @@
                         </details>
 
                         <details>
-                            <summary>Full Response</summary>
+                            <summary>Response</summary>
 
                             <pre th:text="${view.account.responseJson}"></pre>
                         </details>
@@ -313,6 +447,12 @@
                             <summary>Previous-Day Account</summary>
 
                             <pre th:text="${view.previousAccount.accountJson}"></pre>
+                        </details>
+
+                        <details th:if="${view.previousAccount != null}">
+                            <summary>Previous-Day Response</summary>
+
+                            <pre th:text="${view.previousAccount.responseJson}"></pre>
                         </details>
                     </td>
                 </tr>
@@ -324,7 +464,7 @@
         <div class="empty"
              th:if="${accounts == null or accounts.isEmpty()}">
 
-            No accounts found for the selected date and member number.
+            No accounts found for the selected filters.
         </div>
     </div>
 </div>
