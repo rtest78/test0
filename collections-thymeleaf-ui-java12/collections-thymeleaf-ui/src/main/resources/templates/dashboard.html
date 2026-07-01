@@ -12,14 +12,15 @@
 
     <style>
         body {
+            margin: 0;
+            padding: 24px;
             font-family: Arial, sans-serif;
-            margin: 24px;
             background: #f5f7fa;
             color: #202124;
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 1800px;
             margin: auto;
         }
 
@@ -28,11 +29,11 @@
             justify-content: space-between;
             align-items: center;
             gap: 16px;
-            margin-bottom: 20px;
+            margin-bottom: 22px;
         }
 
         h1 {
-            margin: 0;
+            margin: 0 0 8px 0;
         }
 
         .card {
@@ -45,16 +46,22 @@
 
         .message {
             padding: 12px;
+            margin-bottom: 16px;
             background: #e8f5e9;
             border: 1px solid #a5d6a7;
-            margin-bottom: 16px;
+            border-radius: 5px;
         }
 
         .error {
             padding: 12px;
+            margin-bottom: 16px;
             background: #ffebee;
             border: 1px solid #ef9a9a;
-            margin-bottom: 16px;
+            border-radius: 5px;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
         }
 
         table {
@@ -69,6 +76,7 @@
             padding: 10px;
             text-align: left;
             vertical-align: top;
+            white-space: nowrap;
         }
 
         th {
@@ -84,6 +92,7 @@
             color: white;
             text-decoration: none;
             cursor: pointer;
+            white-space: nowrap;
         }
 
         .secondary {
@@ -91,8 +100,27 @@
         }
 
         .filename {
-            max-width: 420px;
+            min-width: 280px;
+            white-space: normal;
             overflow-wrap: anywhere;
+        }
+
+        .number-link {
+            font-weight: bold;
+            color: #1a73e8;
+            text-decoration: none;
+        }
+
+        .missing-link {
+            color: #b3261e;
+        }
+
+        .positive {
+            color: #137333;
+        }
+
+        .negative {
+            color: #b3261e;
         }
 
         .empty {
@@ -112,10 +140,10 @@
         <div>
             <h1>Collections Daily Dashboard</h1>
 
-            <p>
+            <div>
                 Data directory:
                 <strong th:text="${dataDirectory}"></strong>
-            </p>
+            </div>
         </div>
 
         <form th:action="@{/reload}"
@@ -148,46 +176,115 @@
 
     <div class="card">
 
-        <table th:if="${summaries != null and !summaries.isEmpty()}">
+        <div class="table-wrapper"
+             th:if="${summaries != null and !summaries.isEmpty()}">
 
-            <thead>
-            <tr>
-                <th>Business Date</th>
-                <th>Members</th>
-                <th>Accounts</th>
-                <th>Source Records</th>
-                <th>Source Files</th>
-                <th>Actions</th>
-            </tr>
-            </thead>
+            <table>
 
-            <tbody>
+                <thead>
+                <tr>
+                    <th>Business Date</th>
+                    <th>Members</th>
+                    <th>Accounts</th>
+                    <th>New Accounts</th>
+                    <th>Missing Accounts</th>
+                    <th>Changed Accounts</th>
+                    <th>Balance Changed</th>
+                    <th>Total Balance Change</th>
+                    <th>Source Records</th>
+                    <th>Source Files</th>
+                    <th>Actions</th>
+                </tr>
+                </thead>
 
-            <tr th:each="summary : ${summaries}">
+                <tbody>
 
-                <td th:text="${summary.businessDate}"></td>
+                <tr th:each="summary : ${summaries}">
 
-                <td th:text="${summary.memberCount}"></td>
+                    <td th:text="${summary.businessDate}"></td>
 
-                <td th:text="${summary.accountCount}"></td>
+                    <td th:text="${summary.memberCount}"></td>
 
-                <td th:text="${summary.sourceRecordCount}"></td>
+                    <td th:text="${summary.accountCount}"></td>
 
-                <td class="filename"
-                    th:text="${summary.sourceFiles}">
-                </td>
+                    <td>
+                        <a class="number-link"
+                           th:if="${summary.newAccountCount > 0}"
+                           th:href="@{/accounts(
+                               date=${summary.businessDate},
+                               status='NEW'
+                           )}"
+                           th:text="${summary.newAccountCount}">
+                        </a>
 
-                <td>
-                    <a class="button"
-                       th:href="@{/accounts(date=${summary.businessDate})}">
+                        <span th:if="${summary.newAccountCount == 0}">
+                            0
+                        </span>
+                    </td>
 
-                        View Accounts
-                    </a>
-                </td>
-            </tr>
+                    <td>
+                        <a class="number-link missing-link"
+                           th:if="${summary.missingAccountCount > 0}"
+                           th:href="@{/accounts(
+                               date=${summary.businessDate},
+                               status='MISSING'
+                           )}"
+                           th:text="${summary.missingAccountCount}">
+                        </a>
 
-            </tbody>
-        </table>
+                        <span th:if="${summary.missingAccountCount == 0}">
+                            0
+                        </span>
+                    </td>
+
+                    <td>
+                        <a class="number-link"
+                           th:if="${summary.changedAccountCount > 0}"
+                           th:href="@{/accounts(
+                               date=${summary.businessDate},
+                               status='CHANGED'
+                           )}"
+                           th:text="${summary.changedAccountCount}">
+                        </a>
+
+                        <span th:if="${summary.changedAccountCount == 0}">
+                            0
+                        </span>
+                    </td>
+
+                    <td th:text="${summary.balanceChangedAccountCount}">
+                    </td>
+
+                    <td>
+                        <span th:text="${summary.totalBalanceChange}"
+                              th:classappend="${summary.totalBalanceChange != null
+                                  and summary.totalBalanceChange.startsWith('-')}
+                                  ? 'negative'
+                                  : 'positive'">
+                        </span>
+                    </td>
+
+                    <td th:text="${summary.sourceRecordCount}">
+                    </td>
+
+                    <td class="filename"
+                        th:text="${summary.sourceFiles}">
+                    </td>
+
+                    <td>
+                        <a class="button"
+                           th:href="@{/accounts(
+                               date=${summary.businessDate}
+                           )}">
+
+                            View Accounts
+                        </a>
+                    </td>
+                </tr>
+
+                </tbody>
+            </table>
+        </div>
 
         <div class="empty"
              th:if="${summaries == null or summaries.isEmpty()}">
