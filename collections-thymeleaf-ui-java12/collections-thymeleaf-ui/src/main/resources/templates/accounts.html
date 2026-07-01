@@ -1,158 +1,333 @@
 <!DOCTYPE html>
-<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<html lang="en"
+      xmlns:th="http://www.thymeleaf.org">
+
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Daily Accounts</title>
-    <link rel="stylesheet" th:href="@{/css/app.css}">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1">
+
+    <title>Collections Accounts</title>
+
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 24px;
+            background: #f5f7fa;
+            color: #202124;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: auto;
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+
+        .card {
+            background: white;
+            border: 1px solid #dfe3e8;
+            border-radius: 8px;
+            padding: 18px;
+            margin-bottom: 20px;
+        }
+
+        .filters {
+            display: flex;
+            gap: 12px;
+            align-items: end;
+            flex-wrap: wrap;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+
+        input,
+        select {
+            padding: 9px;
+            min-width: 220px;
+            border: 1px solid #c7ccd1;
+            border-radius: 4px;
+        }
+
+        .button {
+            display: inline-block;
+            padding: 9px 14px;
+            border: 0;
+            border-radius: 5px;
+            background: #1a73e8;
+            color: white;
+            text-decoration: none;
+            cursor: pointer;
+        }
+
+        .secondary {
+            background: #5f6368;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+        }
+
+        th,
+        td {
+            border: 1px solid #dfe3e8;
+            padding: 9px;
+            text-align: left;
+            vertical-align: top;
+        }
+
+        th {
+            background: #eef2f7;
+            position: sticky;
+            top: 0;
+        }
+
+        .table-wrapper {
+            overflow-x: auto;
+            max-height: 720px;
+        }
+
+        .status {
+            font-weight: bold;
+        }
+
+        .NEW {
+            color: #137333;
+        }
+
+        .MISSING {
+            color: #b3261e;
+        }
+
+        .CHANGED {
+            color: #b06000;
+        }
+
+        .UNCHANGED {
+            color: #5f6368;
+        }
+
+        details {
+            margin-bottom: 7px;
+        }
+
+        summary {
+            cursor: pointer;
+            color: #1a73e8;
+        }
+
+        pre {
+            max-width: 900px;
+            max-height: 420px;
+            overflow: auto;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            background: #f6f8fa;
+            border: 1px solid #dfe3e8;
+            padding: 10px;
+        }
+
+        .empty {
+            padding: 24px;
+            text-align: center;
+            color: #666;
+        }
+    </style>
 </head>
+
 <body>
-<header class="topbar">
-    <div>
-        <h1>Daily Accounts</h1>
-        <p>Filter by date and member number</p>
-    </div>
-    <nav>
-        <a th:href="@{/}">Dashboard</a>
-        <a class="active" th:href="@{/accounts}">Accounts</a>
-    </nav>
-</header>
 
-<main class="container">
-    <section class="filter-panel">
-        <form method="get" th:action="@{/accounts}">
-            <label>
-                Business date
-                <select name="date">
-                    <option th:each="d : ${availableDates}"
-                            th:value="${d}"
-                            th:text="${d}"
-                            th:selected="${d == selectedDate}"></option>
-                </select>
-            </label>
+<div class="container">
 
-            <label>
-                Member number
-                <input type="text" name="memberNumber" th:value="${memberNumber}"
-                       placeholder="Enter exact member number">
-            </label>
+    <div class="header">
 
-            <button type="submit">Apply filter</button>
-            <a class="secondary-button" th:href="@{/accounts(date=${selectedDate})}">Clear member</a>
-        </form>
-    </section>
+        <div>
+            <h1>Daily Accounts</h1>
 
-    <section th:if="${snapshot != null}" class="summary-strip">
-        <div><span>Date</span><strong th:text="${snapshot.businessDate}">date</strong></div>
-        <div><span>File</span><strong th:text="${snapshot.sourceFile}">file</strong></div>
-        <div><span>Members</span><strong th:text="${snapshot.memberCount}">0</strong></div>
-        <div><span>Accounts</span><strong th:text="${snapshot.accountCount}">0</strong></div>
-    </section>
+            <p th:if="${snapshot != null}">
 
-    <section class="table-section">
-        <div class="section-heading">
-            <div>
-                <h2>Accounts present on selected day</h2>
-                <p th:text="${accounts.size() + ' account(s) found'}">0 accounts</p>
-            </div>
+                Members:
+                <strong th:text="${snapshot.memberCount}"></strong>
+
+                &nbsp;|&nbsp;
+
+                Accounts:
+                <strong th:text="${snapshot.accountCount}"></strong>
+
+                &nbsp;|&nbsp;
+
+                Files:
+                <strong th:text="${snapshot.sourceFiles}"></strong>
+            </p>
         </div>
 
-        <div class="table-wrap">
+        <a class="button secondary"
+           th:href="@{/}">
+
+            Dashboard
+        </a>
+    </div>
+
+    <div class="card">
+
+        <form class="filters"
+              th:action="@{/accounts}"
+              method="get">
+
+            <div>
+                <label for="date">
+                    Business Date
+                </label>
+
+                <select id="date"
+                        name="date">
+
+                    <option th:each="availableDate : ${availableDates}"
+                            th:value="${availableDate}"
+                            th:text="${availableDate}"
+                            th:selected="${availableDate == selectedDate}">
+                    </option>
+                </select>
+            </div>
+
+            <div>
+                <label for="memberNumber">
+                    Member Number
+                </label>
+
+                <input id="memberNumber"
+                       name="memberNumber"
+                       type="text"
+                       placeholder="Enter member number"
+                       th:value="${memberNumber}">
+            </div>
+
+            <div>
+                <button class="button"
+                        type="submit">
+
+                    Filter
+                </button>
+
+                <a class="button secondary"
+                   th:href="@{/accounts(date=${selectedDate})}">
+
+                    Clear Member
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <div class="card">
+
+        <div class="table-wrapper"
+             th:if="${accounts != null and !accounts.isEmpty()}">
+
             <table>
+
                 <thead>
                 <tr>
-                    <th>Status</th>
-                    <th>Member number</th>
-                    <th>Account number</th>
-                    <th>Account status</th>
-                    <th>Past due</th>
+                    <th>Change</th>
+                    <th>Member Number</th>
+                    <th>Account Number</th>
+                    <th>Account Status</th>
+                    <th>Past Due</th>
                     <th>Balance</th>
-                    <th>Credit limit</th>
+                    <th>Credit Limit</th>
                     <th>FICO</th>
-                    <th>Response action</th>
-                    <th>Risk score</th>
-                    <th>Details</th>
+                    <th>Action Type</th>
+                    <th>Source File</th>
+                    <th>JSON</th>
                 </tr>
                 </thead>
+
                 <tbody>
+
                 <tr th:each="view : ${accounts}">
-                    <td><span class="badge" th:classappend="${#strings.toLowerCase(view.changeType.name())}"
-                              th:text="${view.changeType}">UNCHANGED</span></td>
+
+                    <td>
+                        <span class="status"
+                              th:classappend="${view.changeType}"
+                              th:text="${view.changeType}">
+                        </span>
+                    </td>
+
                     <td th:text="${view.account.memberNumber}"></td>
+
                     <td th:text="${view.account.accountNumber}"></td>
-                    <td th:text="${view.account.requestValue('accountStatus')}"></td>
-                    <td th:text="${view.account.requestValue('amountPastDue')}"></td>
-                    <td th:text="${view.account.requestValue('accountBalance')}"></td>
-                    <td th:text="${view.account.requestValue('creditLimit')}"></td>
-                    <td th:text="${view.account.requestValue('fico09Score')}"></td>
-                    <td th:text="${view.account.responseValue('actionType')}"></td>
-                    <td th:text="${view.account.responseValue('collectionRiskScore')}"></td>
+
+                    <td th:text="${view.account.accountStatus}"></td>
+
+                    <td th:text="${view.account.amountPastDue}"></td>
+
+                    <td th:text="${view.account.accountBalance}"></td>
+
+                    <td th:text="${view.account.creditLimit}"></td>
+
+                    <td th:text="${view.account.ficoScore}"></td>
+
+                    <td th:text="${view.account.actionType}"></td>
+
+                    <td>
+                        <span th:text="${view.account.sourceFile}"></span>
+
+                        <br>
+
+                        Line:
+                        <span th:text="${view.account.sourceLine}"></span>
+                    </td>
+
                     <td>
                         <details>
-                            <summary>View JSON fields</summary>
-                            <div class="details-grid">
-                                <div>
-                                    <h4>Request</h4>
-                                    <dl>
-                                        <th:block th:each="entry : ${view.account.requestFields}">
-                                            <dt th:text="${entry.key}"></dt>
-                                            <dd th:text="${entry.value}"></dd>
-                                        </th:block>
-                                    </dl>
-                                </div>
-                                <div>
-                                    <h4>Response</h4>
-                                    <dl>
-                                        <th:block th:each="entry : ${view.account.responseFields}">
-                                            <dt th:text="${entry.key}"></dt>
-                                            <dd th:text="${entry.value}"></dd>
-                                        </th:block>
-                                    </dl>
-                                </div>
-                            </div>
+                            <summary>Account JSON</summary>
+
+                            <pre th:text="${view.account.accountJson}"></pre>
+                        </details>
+
+                        <details>
+                            <summary>Full Request</summary>
+
+                            <pre th:text="${view.account.requestJson}"></pre>
+                        </details>
+
+                        <details>
+                            <summary>Full Response</summary>
+
+                            <pre th:text="${view.account.responseJson}"></pre>
+                        </details>
+
+                        <details th:if="${view.previousAccount != null}">
+                            <summary>Previous-Day Account</summary>
+
+                            <pre th:text="${view.previousAccount.accountJson}"></pre>
                         </details>
                     </td>
                 </tr>
-                <tr th:if="${#lists.isEmpty(accounts)}">
-                    <td colspan="11" class="empty-cell">No accounts matched this filter.</td>
-                </tr>
-                </tbody>
-            </table>
-        </div>
-    </section>
 
-    <section class="table-section" th:if="${!#lists.isEmpty(missingAccounts)}">
-        <div class="section-heading">
-            <div>
-                <h2>Missing from selected day</h2>
-                <p>Accounts that existed on Day 1 but are absent from this date</p>
-            </div>
-        </div>
-        <div class="table-wrap">
-            <table>
-                <thead>
-                <tr>
-                    <th>Status</th>
-                    <th>Member number</th>
-                    <th>Account number</th>
-                    <th>Day 1 account status</th>
-                    <th>Day 1 balance</th>
-                    <th>Day 1 past due</th>
-                </tr>
-                </thead>
-                <tbody>
-                <tr th:each="view : ${missingAccounts}">
-                    <td><span class="badge missing">MISSING</span></td>
-                    <td th:text="${view.account.memberNumber}"></td>
-                    <td th:text="${view.account.accountNumber}"></td>
-                    <td th:text="${view.account.requestValue('accountStatus')}"></td>
-                    <td th:text="${view.account.requestValue('accountBalance')}"></td>
-                    <td th:text="${view.account.requestValue('amountPastDue')}"></td>
-                </tr>
                 </tbody>
             </table>
         </div>
-    </section>
-</main>
+
+        <div class="empty"
+             th:if="${accounts == null or accounts.isEmpty()}">
+
+            No accounts found for the selected date and member number.
+        </div>
+    </div>
+</div>
+
 </body>
 </html>
