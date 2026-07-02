@@ -20,7 +20,7 @@
         }
 
         .container {
-            max-width: 1900px;
+            max-width: 2000px;
             margin: auto;
         }
 
@@ -33,7 +33,7 @@
         }
 
         h1 {
-            margin: 0 0 8px 0;
+            margin: 0 0 8px;
         }
 
         .card {
@@ -80,13 +80,46 @@
             background: #5f6368;
         }
 
-        .summary-line {
-            margin-top: 8px;
+        .counts {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+
+        .count-box {
+            min-width: 135px;
+            padding: 12px;
+            border: 1px solid #dfe3e8;
+            border-radius: 6px;
+            background: #f8fafc;
+        }
+
+        .count-box strong {
+            display: block;
+            font-size: 22px;
+            margin-top: 5px;
+        }
+
+        .missing-count strong {
+            color: #b3261e;
+        }
+
+        .new-count strong {
+            color: #137333;
+        }
+
+        .changed-count strong {
+            color: #b06000;
+        }
+
+        .warning {
+            background: #fff4e5;
+            border-color: #f5c26b;
         }
 
         .table-wrapper {
             overflow: auto;
-            max-height: 730px;
+            max-height: 740px;
         }
 
         table {
@@ -141,6 +174,11 @@
             font-weight: bold;
         }
 
+        .response-missing {
+            color: #b3261e;
+            font-weight: bold;
+        }
+
         details {
             margin-bottom: 8px;
         }
@@ -162,9 +200,30 @@
             padding: 10px;
         }
 
-        .source {
+        .changed-fields {
+            min-width: 470px;
             white-space: normal;
-            min-width: 210px;
+        }
+
+        .change-item {
+            margin-bottom: 8px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #e5e7eb;
+        }
+
+        .old-value {
+            color: #b3261e;
+            overflow-wrap: anywhere;
+        }
+
+        .new-value {
+            color: #137333;
+            overflow-wrap: anywhere;
+        }
+
+        .source {
+            min-width: 220px;
+            white-space: normal;
             overflow-wrap: anywhere;
         }
 
@@ -188,10 +247,9 @@
     <div class="header">
 
         <div>
-            <h1>Daily Accounts</h1>
+            <h1>Daily Account Comparison</h1>
 
-            <div class="summary-line"
-                 th:if="${snapshot != null}">
+            <div th:if="${snapshot != null}">
 
                 Date:
                 <strong th:text="${selectedDate}"></strong>
@@ -208,7 +266,7 @@
 
                 &nbsp;|&nbsp;
 
-                Source files:
+                Files:
                 <strong th:text="${snapshot.sourceFiles}"></strong>
             </div>
         </div>
@@ -309,8 +367,82 @@
 
     <div class="card">
 
+        <div class="counts">
+
+            <div class="count-box">
+                Compared Accounts
+                <strong th:text="${comparisonSummary.totalAccountCount}">
+                </strong>
+            </div>
+
+            <div class="count-box new-count">
+                New
+                <strong th:text="${comparisonSummary.newAccountCount}">
+                </strong>
+            </div>
+
+            <div class="count-box missing-count">
+                Missing
+                <strong th:text="${comparisonSummary.missingAccountCount}">
+                </strong>
+            </div>
+
+            <div class="count-box changed-count">
+                Changed Accounts
+                <strong th:text="${comparisonSummary.changedAccountCount}">
+                </strong>
+            </div>
+
+            <div class="count-box">
+                Unchanged
+                <strong th:text="${comparisonSummary.unchangedAccountCount}">
+                </strong>
+            </div>
+
+            <div class="count-box">
+                Changed Fields
+                <strong th:text="${comparisonSummary.changedFieldCount}">
+                </strong>
+            </div>
+
+            <div class="count-box">
+                Balance Changed
+                <strong th:text="${comparisonSummary.balanceChangedAccountCount}">
+                </strong>
+            </div>
+
+            <div class="count-box">
+                Total Balance Change
+                <strong th:text="${comparisonSummary.totalBalanceChange}">
+                </strong>
+            </div>
+        </div>
+    </div>
+
+    <div class="card warning"
+         th:if="${resultsTruncated}">
+
+        <strong th:text="${matchedCount}"></strong>
+        records matched.
+
+        Only the first
+        <strong th:text="${displayedCount}"></strong>
+        records are displayed. Enter a member number to narrow the results.
+    </div>
+
+    <div class="card">
+
+        <div class="empty"
+             th:if="${!hasSearchCriteria}">
+
+            Enter a member number or select a change type
+            to load account records.
+        </div>
+
         <div class="table-wrapper"
-             th:if="${accounts != null and !accounts.isEmpty()}">
+             th:if="${hasSearchCriteria
+                 and accounts != null
+                 and !accounts.isEmpty()}">
 
             <table>
 
@@ -322,12 +454,16 @@
                     <th>Previous Balance</th>
                     <th>Current Balance</th>
                     <th>Balance Change</th>
+                    <th>Changed Field Count</th>
+                    <th>Changed Fields</th>
                     <th>Channel</th>
                     <th>Account Status</th>
+                    <th>Delinquent Days</th>
                     <th>Past Due</th>
                     <th>Credit Limit</th>
                     <th>FICO</th>
                     <th>Action Type</th>
+                    <th>Response Status</th>
                     <th>Source</th>
                     <th>JSON Details</th>
                 </tr>
@@ -387,10 +523,58 @@
                         </span>
                     </td>
 
+                    <td th:text="${view.changedFieldCount}">
+                    </td>
+
+                    <td class="changed-fields">
+
+                        <details th:if="${view.changedFields != null
+                            and !view.changedFields.isEmpty()}">
+
+                            <summary>
+                                View Changed Fields
+                            </summary>
+
+                            <div th:each="fieldChange : ${view.changedFields}"
+                                 class="change-item">
+
+                                <strong th:text="${fieldChange.section}">
+                                </strong>
+
+                                <span> / </span>
+
+                                <strong th:text="${fieldChange.fieldName}">
+                                </strong>
+
+                                <div>
+                                    Old:
+                                    <span class="old-value"
+                                          th:text="${fieldChange.previousValue}">
+                                    </span>
+                                </div>
+
+                                <div>
+                                    New:
+                                    <span class="new-value"
+                                          th:text="${fieldChange.currentValue}">
+                                    </span>
+                                </div>
+                            </div>
+                        </details>
+
+                        <span th:if="${view.changedFields == null
+                            or view.changedFields.isEmpty()}">
+                            -
+                        </span>
+                    </td>
+
                     <td th:text="${view.channel}">
                     </td>
 
                     <td th:text="${view.account.accountStatus}">
+                    </td>
+
+                    <td th:text="${view.account.loanDelinquentDayCount}">
                     </td>
 
                     <td th:text="${view.account.amountPastDue}">
@@ -403,6 +587,17 @@
                     </td>
 
                     <td th:text="${view.account.actionType}">
+                    </td>
+
+                    <td>
+                        <span th:if="${view.account.responseAvailable}">
+                            Available
+                        </span>
+
+                        <span class="response-missing"
+                              th:if="${!view.account.responseAvailable}">
+                            Wrapper not found
+                        </span>
                     </td>
 
                     <td class="source">
@@ -438,7 +633,7 @@
                         </details>
 
                         <details>
-                            <summary>Response</summary>
+                            <summary>Response / Raw Output</summary>
 
                             <pre th:text="${view.account.responseJson}"></pre>
                         </details>
@@ -462,7 +657,8 @@
         </div>
 
         <div class="empty"
-             th:if="${accounts == null or accounts.isEmpty()}">
+             th:if="${hasSearchCriteria
+                 and (accounts == null or accounts.isEmpty())}">
 
             No accounts found for the selected filters.
         </div>
