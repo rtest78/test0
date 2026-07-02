@@ -20,7 +20,7 @@
         }
 
         .container {
-            max-width: 1800px;
+            max-width: 1900px;
             margin: auto;
         }
 
@@ -33,7 +33,7 @@
         }
 
         h1 {
-            margin: 0 0 8px 0;
+            margin: 0 0 8px;
         }
 
         .card {
@@ -92,7 +92,6 @@
             color: white;
             text-decoration: none;
             cursor: pointer;
-            white-space: nowrap;
         }
 
         .secondary {
@@ -111,16 +110,18 @@
             text-decoration: none;
         }
 
-        .missing-link {
+        .missing {
             color: #b3261e;
         }
 
         .positive {
             color: #137333;
+            font-weight: bold;
         }
 
         .negative {
             color: #b3261e;
+            font-weight: bold;
         }
 
         .empty {
@@ -186,9 +187,11 @@
                     <th>Business Date</th>
                     <th>Members</th>
                     <th>Accounts</th>
-                    <th>New Accounts</th>
-                    <th>Missing Accounts</th>
+                    <th>New</th>
+                    <th>Missing</th>
                     <th>Changed Accounts</th>
+                    <th>Unchanged</th>
+                    <th>Changed Fields</th>
                     <th>Balance Changed</th>
                     <th>Total Balance Change</th>
                     <th>Source Records</th>
@@ -201,11 +204,14 @@
 
                 <tr th:each="summary : ${summaries}">
 
-                    <td th:text="${summary.businessDate}"></td>
+                    <td th:text="${summary.businessDate}">
+                    </td>
 
-                    <td th:text="${summary.memberCount}"></td>
+                    <td th:text="${summary.memberCount}">
+                    </td>
 
-                    <td th:text="${summary.accountCount}"></td>
+                    <td th:text="${summary.accountCount}">
+                    </td>
 
                     <td>
                         <a class="number-link"
@@ -223,7 +229,7 @@
                     </td>
 
                     <td>
-                        <a class="number-link missing-link"
+                        <a class="number-link missing"
                            th:if="${summary.missingAccountCount > 0}"
                            th:href="@{/accounts(
                                date=${summary.businessDate},
@@ -250,6 +256,12 @@
                         <span th:if="${summary.changedAccountCount == 0}">
                             0
                         </span>
+                    </td>
+
+                    <td th:text="${summary.unchangedAccountCount}">
+                    </td>
+
+                    <td th:text="${summary.changedFieldCount}">
                     </td>
 
                     <td th:text="${summary.balanceChangedAccountCount}">
