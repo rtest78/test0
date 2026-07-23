@@ -1,8 +1,67 @@
-<xsl:when test="name() = 'SentiLinkResponse'">
+<xsl:template match="SentiLinkScoresResponse">
     <xsl:text>{</xsl:text>
     <xsl:call-template name="process-children">
-        <xsl:with-param name="nodes"
-            select="*[* or @* or normalize-space(translate(., '&quot;', ''))]"/>
+        <xsl:with-param name="nodes" select="*"/>
     </xsl:call-template>
+    <xsl:text>}</xsl:text>
+</xsl:template>
+
+
+<xsl:template match="SentiLinkECBSVResponse">
+    <xsl:text>{</xsl:text>
+    <xsl:call-template name="process-children">
+        <xsl:with-param name="nodes" select="*"/>
+    </xsl:call-template>
+    <xsl:text>}</xsl:text>
+</xsl:template>
+
+
+<xsl:when test="
+    name() = 'SentiLinkResponse'
+    and
+    (
+        SentiLinkScoresResponse[
+            * or @* or normalize-space(.)
+        ]
+        or
+        SentiLinkECBSVResponse[
+            * or @* or normalize-space(.)
+        ]
+    )
+">
+    <xsl:text>{</xsl:text>
+
+    <xsl:if test="
+        SentiLinkScoresResponse[
+            * or @* or normalize-space(.)
+        ]
+    ">
+        <xsl:text>"SentiLinkScoresResponse": </xsl:text>
+        <xsl:apply-templates
+            select="SentiLinkScoresResponse[
+                * or @* or normalize-space(.)
+            ]"/>
+
+        <xsl:if test="
+            SentiLinkECBSVResponse[
+                * or @* or normalize-space(.)
+            ]
+        ">
+            <xsl:text>,</xsl:text>
+        </xsl:if>
+    </xsl:if>
+
+    <xsl:if test="
+        SentiLinkECBSVResponse[
+            * or @* or normalize-space(.)
+        ]
+    ">
+        <xsl:text>"SentiLinkECBSVResponse": </xsl:text>
+        <xsl:apply-templates
+            select="SentiLinkECBSVResponse[
+                * or @* or normalize-space(.)
+            ]"/>
+    </xsl:if>
+
     <xsl:text>}</xsl:text>
 </xsl:when>
