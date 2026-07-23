@@ -1,82 +1,61 @@
-<!-- SentiLinkScoresResponse template -->
-<xsl:template match="SentiLinkScoresResponse">
+<xsl:template match="/*">
     <xsl:text>{</xsl:text>
+    <xsl:text>"</xsl:text>
+    <xsl:value-of select="name()"/>
+    <xsl:text>": {</xsl:text>
+
+    <xsl:if test="@*">
+        <xsl:call-template name="process-attributes">
+            <xsl:with-param name="attributes" select="@*"/>
+        </xsl:call-template>
+    </xsl:if>
+
+    <xsl:if test="@* and *">
+        <xsl:text>,</xsl:text>
+    </xsl:if>
+
     <xsl:call-template name="process-children">
-        <xsl:with-param name="nodes" select="*"/>
+        <xsl:with-param name="nodes"
+            select="*[
+                not(
+                    self::SentiLinkResponse[
+                        not(SentiLinkScoresResponse[
+                            normalize-space(.) or * or @*
+                        ])
+                        and
+                        not(SentiLinkECBSVResponse[
+                            normalize-space(.) or * or @*
+                        ])
+                    ]
+                )
+            ]"/>
     </xsl:call-template>
+
+    <xsl:text>}</xsl:text>
+    <xsl:text>}</xsl:text>
+</xsl:template>
+
+
+
+-------------------------
+
+
+
+<xsl:template match="SentiLinkResponse">
+    <xsl:text>{</xsl:text>
+
+    <xsl:call-template name="process-children">
+        <xsl:with-param name="nodes"
+            select="*[
+                normalize-space(.) or
+                * or
+                @*
+            ]"/>
+    </xsl:call-template>
+
     <xsl:text>}</xsl:text>
 
     <xsl:if test="position() != last()">
         <xsl:text>,</xsl:text>
     </xsl:if>
 </xsl:template>
-
-
-<!-- SentiLinkECBSVResponse template -->
-<xsl:template match="SentiLinkECBSVResponse">
-    <xsl:text>{</xsl:text>
-    <xsl:call-template name="process-children">
-        <xsl:with-param name="nodes" select="*"/>
-    </xsl:call-template>
-    <xsl:text>}</xsl:text>
-
-    <xsl:if test="position() != last()">
-        <xsl:text>,</xsl:text>
-    </xsl:if>
-</xsl:template>
-
-
-<!-- Add this inside your existing xsl:choose -->
-<xsl:when test="name() = 'SentiLinkResponse'">
-
-    <!-- Continue only when at least one child has data -->
-    <xsl:if test="
-        SentiLinkScoresResponse[normalize-space(.) or * or @*]
-        or
-        SentiLinkECBSVResponse[normalize-space(.) or * or @*]
-    ">
-
-        <xsl:text>{</xsl:text>
-
-        <!-- Include Scores only when it has data -->
-        <xsl:if test="
-            SentiLinkScoresResponse[
-                normalize-space(.) or * or @*
-            ]
-        ">
-            <xsl:text>"SentiLinkScoresResponse": </xsl:text>
-
-            <xsl:apply-templates
-                select="SentiLinkScoresResponse[
-                    normalize-space(.) or * or @*
-                ]"/>
-
-            <!-- Add comma only when ECBSV also has data -->
-            <xsl:if test="
-                SentiLinkECBSVResponse[
-                    normalize-space(.) or * or @*
-                ]
-            ">
-                <xsl:text>,</xsl:text>
-            </xsl:if>
-        </xsl:if>
-
-        <!-- Include ECBSV only when it has data -->
-        <xsl:if test="
-            SentiLinkECBSVResponse[
-                normalize-space(.) or * or @*
-            ]
-        ">
-            <xsl:text>"SentiLinkECBSVResponse": </xsl:text>
-
-            <xsl:apply-templates
-                select="SentiLinkECBSVResponse[
-                    normalize-space(.) or * or @*
-                ]"/>
-        </xsl:if>
-
-        <xsl:text>}</xsl:text>
-
-    </xsl:if>
-
-</xsl:when>
